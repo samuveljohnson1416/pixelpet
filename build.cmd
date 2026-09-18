@@ -1,0 +1,4 @@
+@echo off
+cd /d "%~dp0"
+if not exist app.ico python src\make_icon.py app.ico
+"%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /platform:x64 /optimize+ /win32icon:app.ico /out:PixelPetFocus.exe src\PixelPetFocus.cs

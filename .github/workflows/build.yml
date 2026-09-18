@@ -1,0 +1,41 @@
+# Builds PixelPetFocus.exe with the C# compiler that ships with Windows, runs the self-test,
+# and attaches the exe to a GitHub Release whenever a tag like v1.0.0 is pushed.
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        shell: cmd
+        run: build.cmd
+
+      - name: Self-test
+        shell: pwsh
+        run: |
+          $p = Start-Process .\PixelPetFocus.exe -ArgumentList '--selftest' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "self-test failed: $($p.ExitCode) check(s)" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PixelPetFocus
+          path: PixelPetFocus.exe
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: PixelPetFocus.exe
+          generate_release_notes: true
