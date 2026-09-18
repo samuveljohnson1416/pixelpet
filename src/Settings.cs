@@ -14,7 +14,7 @@ static class Settings
               ID_SIZE = 111, ID_FOCUS = 112, ID_BREAK = 113, ID_AUTOSTART = 114, ID_LIST = 115,
               ID_RLABEL = 116, ID_RSECS = 117, ID_RPATS = 118, ID_ADD = 119, ID_APPLY = 120,
               ID_DEL = 121, ID_DEFAULTS = 122, ID_NEVER = 123, ID_SAVE = 124, ID_CLOSEBTN = 125,
-              ID_OPENTXT = 126, ID_UP = 127, ID_DOWN = 128, ID_CLIP = 129, ID_HOTKEY = 130;
+              ID_OPENTXT = 126, ID_UP = 127, ID_DOWN = 128, ID_CLIP = 129, ID_HOTKEY = 130, ID_CLIMB = 131;
 
     static readonly double[] Sizes = { 0.75, 1, 1.25, 1.5, 2 };
     static readonly string[] SizeNames = { "0.75x", "1x", "1.25x", "1.5x", "2x" };
@@ -43,7 +43,7 @@ static class Settings
         var o = new Cfg();
         o.Countdown = c.Countdown; o.Snooze = c.Snooze; o.Focus = c.Focus; o.Break = c.Break;
         o.Nag = c.Nag; o.Wander = c.Wander; o.Sleepy = c.Sleepy; o.Typing = c.Typing;
-        o.EnterRope = c.EnterRope; o.Audio = c.Audio; o.Clipboard = c.Clipboard; o.Hotkey = c.Hotkey; o.Size = c.Size;
+        o.EnterRope = c.EnterRope; o.Climb = c.Climb; o.Audio = c.Audio; o.Clipboard = c.Clipboard; o.Hotkey = c.Hotkey; o.Size = c.Size;
         o.Never = (string[])c.Never.Clone();
         o.Rules = c.Rules;
         return o;
@@ -116,15 +116,16 @@ static class Settings
         Label("Snooze when you click it (min)", 24, 112, 200);
         Edit(230, 110, 60, 22, 0x2000, ID_SNOOZE);
 
-        Group("The pet", 12, 162, 312, 200);
+        Group("The pet", 12, 162, 312, 204);
         Check("Wander around the screen", 24, 182, 280, ID_WANDER);
         Check("Take naps", 24, 206, 280, ID_SLEEPY);
         Check("Pull out a laptop while you type", 24, 230, 280, ID_TYPING);
         Check("Throw a rope when you press Enter", 24, 254, 280, ID_ROPE);
         Check("Headphones, music and class reactions", 24, 278, 290, ID_AUDIO);
-        Label("Size", 24, 308, 40);
-        Mk("COMBOBOX", "", 0x10003, 66, 306, 100, 200, ID_SIZE);                    // CBS_DROPDOWNLIST|WS_TABSTOP
-        Label("(applies on restart)", 174, 308, 140);
+        Check("Climb up the screen edges", 24, 302, 280, ID_CLIMB);
+        Label("Size", 24, 334, 40);
+        Mk("COMBOBOX", "", 0x10003, 66, 332, 100, 200, ID_SIZE);                    // CBS_DROPDOWNLIST|WS_TABSTOP
+        Label("(applies on restart)", 174, 334, 140);
 
         Group("Focus timer", 12, 370, 312, 92);
         Label("Focus session (min)", 24, 392, 140);
@@ -199,7 +200,7 @@ static class Settings
         SetText(ID_COUNT, cfg.Countdown.ToString()); SetText(ID_SNOOZE, cfg.Snooze.ToString());
         SetCheck(ID_WANDER, cfg.Wander); SetCheck(ID_SLEEPY, cfg.Sleepy);
         SetCheck(ID_TYPING, cfg.Typing); SetCheck(ID_ROPE, cfg.EnterRope); SetCheck(ID_AUDIO, cfg.Audio);
-        SetCheck(ID_CLIP, cfg.Clipboard); SetCheck(ID_HOTKEY, cfg.Hotkey);
+        SetCheck(ID_CLIP, cfg.Clipboard); SetCheck(ID_HOTKEY, cfg.Hotkey); SetCheck(ID_CLIMB, cfg.Climb);
         int pick = 1;
         for (int i = 0; i < Sizes.Length; i++) if (Math.Abs(Sizes[i] - cfg.Size) < 0.01) pick = i;
         SendMessage(ctl[ID_SIZE], 0x014E, (IntPtr)pick, IntPtr.Zero);                   // CB_SETCURSEL
@@ -276,7 +277,7 @@ static class Settings
         cfg.Snooze = GetNum(ID_SNOOZE, 1, 600, 5);
         cfg.Wander = GetCheck(ID_WANDER); cfg.Sleepy = GetCheck(ID_SLEEPY);
         cfg.Typing = GetCheck(ID_TYPING); cfg.EnterRope = GetCheck(ID_ROPE); cfg.Audio = GetCheck(ID_AUDIO);
-        cfg.Clipboard = GetCheck(ID_CLIP); cfg.Hotkey = GetCheck(ID_HOTKEY);
+        cfg.Clipboard = GetCheck(ID_CLIP); cfg.Hotkey = GetCheck(ID_HOTKEY); cfg.Climb = GetCheck(ID_CLIMB);
         cfg.Focus = GetNum(ID_FOCUS, 1, 600, 25); cfg.Break = GetNum(ID_BREAK, 1, 600, 5);
         int sel = SendMessage(ctl[ID_SIZE], 0x0147, IntPtr.Zero, IntPtr.Zero).ToInt32();   // CB_GETCURSEL
         cfg.Size = sel >= 0 && sel < Sizes.Length ? Sizes[sel] : 1;
@@ -309,12 +310,27 @@ static class Settings
         sb.Append("sleepy = ").Append(YN(c.Sleepy)).Append("\r\n");
         sb.Append("typing = ").Append(YN(c.Typing)).Append("\r\n");
         sb.Append("enterrope = ").Append(YN(c.EnterRope)).Append("\r\n");
+        sb.Append("climb = ").Append(YN(c.Climb)).Append("\r\n");
         sb.Append("audio = ").Append(YN(c.Audio)).Append("\r\n");
         sb.Append("clipboard = ").Append(YN(c.Clipboard)).Append("\r\n");
         sb.Append("hotkey = ").Append(YN(c.Hotkey)).Append("\r\n");
         sb.Append("size = ").Append(c.Size.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
         sb.Append("focus = ").Append(c.Focus).Append("\r\n");
-        sb.Append("break = ").Append(c.Break).Append("\r\n\r\n");
+        sb.Append("break = ").Append(c.Break).Append("\r\n");
+        // keep settings this window doesn't know yet (added by a newer build or by hand), so Save never drops them
+        var written = sb.ToString();
+        try
+        {
+            foreach (var raw in File.ReadAllLines(rulesPath))
+            {
+                string line = raw.Trim(); int eq = line.IndexOf('=');
+                if (line.StartsWith("#") || line.Contains("|") || eq <= 0) continue;
+                string key = line.Substring(0, eq).Trim().ToLowerInvariant();
+                if (written.IndexOf("\n" + key + " = ", StringComparison.Ordinal) < 0 && !written.StartsWith(key + " = ")) sb.Append(line).Append("\r\n");
+            }
+        }
+        catch { }
+        sb.Append("\r\n");
         sb.Append("never | ").Append(string.Join(", ", c.Never)).Append("\r\n\r\n");
         sb.Append("# label | seconds allowed | phrases (any one matches). First match wins.\r\n");
         foreach (var r in c.Rules) sb.Append(r.Label).Append(" | ").Append(r.Grace).Append(" | ").Append(string.Join(", ", r.Any)).Append("\r\n");
