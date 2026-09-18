@@ -16,7 +16,7 @@ class Rule { public string Label; public int Grace; public string[] Any; }
 class Cfg
 {
     public int Countdown = 3, Snooze = 5, Focus = 25, Break = 5;
-    public bool Nag, Wander = true, Sleepy = true, Typing = true, EnterRope = true, Climb = true, Audio = true, Clipboard = true, Hotkey = true;
+    public bool Nag, Wander = true, Sleepy = true, Typing = true, EnterRope = true, Climb = true, Audio = true, Clipboard = true, Hotkey = true, Curious = true;
     public double Size = 1;
     public string[] Never = new string[0];
     public Rule[] Rules = new Rule[0];
@@ -43,6 +43,7 @@ enterrope = yes    # throws a rope at your caret/cursor when you press Enter
 climb = yes        # climbs the screen edges and walks upside-down along the top
 clipboard = yes    # notices useful copied text (times, links, sums); ignores passwords
 hotkey = yes       # Ctrl+Alt+R opens the clipboard menu (restart to apply)
+curious = yes      # visits the window you're using, comments on it, asks what you're doing
 audio = yes        # wears headphones when they're connected; dances to music, takes notes in class/calls
 size = 1           # pet size multiplier (restart)
 focus = 25         # focus timer minutes
@@ -121,6 +122,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                     case "climb": c.Climb = yes; break;
                     case "clipboard": c.Clipboard = yes; break;
                     case "hotkey": c.Hotkey = yes; break;
+                    case "curious": c.Curious = yes; break;
                     case "audio": c.Audio = yes; break;
                     case "size": double d; if (double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out d)) c.Size = Math.Max(0.5, Math.Min(4, d)); break;
                 }
@@ -208,13 +210,16 @@ YouTube         | 240 | youtube.com/watch, - youtube
     // x,y is always the contact point; on a wall y runs along it, on the top edge x does.
     static int orient, climbNext; static double climbTarget; static bool climbUp, climbAfterWalk, hangSleep;
     static readonly StringBuilder clsBuf = new StringBuilder(64);
+    static string fgProc = "", fgTitle = "", fgUrl = ""; static IntPtr fgHwnd;      // latest foreground snapshot, written by the watcher
+    static double curiousT = 90, askT; static string curiousLine, lastActivity = ""; static bool curiousAsk; static DateTime curiousAt;
+    static string doing = ""; static DateTime doingUntil;                        // your quick-reply answer and how long it holds
     static readonly string[] Codes = { "{ }", "01", ";", "</>", "#", "=>", "()" };
     static double secAcc;
 
     const int CUP = 0xC8D25A, CUPDARK = 0x8C9637, PAPER = 0xF0F5F5, INK = 0xB4AAA0;
     const int ROPE = 0x325A8C, STAR = 0x30D8FF, GREEN = 0x50C850, SIGN = 0x9CF0FF;
     const int LID = 0x4E4646, BASE = 0x322D2D, LOGO = 0xB48C64, GLOW = 0xFFDC8C;
-    const int KEY = 0xFF00FF, CORAL = 0xB6C42E, ANGRY = 0x4058E8, EYE = 0x141414, DARK = 0x282828, WHITE = 0xFFFFFF, PINK = 0x875FFF;
+    const int KEY = 0xFF00FF, CORAL = 0x5777D9, ANGRY = 0x4058E8, EYE = 0x141414, DARK = 0x282828, WHITE = 0xFFFFFF, PINK = 0x875FFF;
     static readonly Dictionary<int, IntPtr> brushes = new Dictionary<int, IntPtr>();
     static IntPtr fontBubble, fontSmall, penDark;
 
@@ -330,7 +335,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         double dt = Math.Min(0.1, (now - lastTick) / 1000.0); lastTick = now;
         animT += dt; stateT += dt;
         chargeT = Math.Max(0, chargeT - dt);
-        clipOfferT -= dt;
+        clipOfferT -= dt; curiousT -= dt; askT -= dt;
         joyT = Math.Max(0, joyT - dt); angryT = Math.Max(0, angryT - dt); sqT = Math.Max(0, sqT - dt); bubbleT -= dt;
         blinkT -= dt; blinkOn -= dt;
         if (blinkT <= 0) { blinkOn = 0.13; blinkT = Rand(2, 6); }
@@ -407,6 +412,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         switch (state)
         {
             case SIT:
+                if (curiousLine != null && stateT >= 0.4) DeliverCurious();     // arrived at your window: say it
                 if (stateT >= stateDur && sign == null) ChooseNext();          // a reminder sign keeps it put
                 break;
             case WALK:
@@ -600,6 +606,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     {
         double r = rnd.NextDouble();
         if (lastKind == 2 || (lastKind == 1 && r < 0.6)) { SetState(SIT, Rand(4, 8)); return; }   // class: don't distract
+        if (CuriousVisit()) return;
         if (perch != IntPtr.Zero)
         {
             if (r < 0.35 && cfg.Wander) Walk(Rand(MinX(), MaxX()));
@@ -615,6 +622,88 @@ YouTube         | 240 | youtube.com/watch, - youtube
         else if (r < 0.9 && cfg.Wander) { POINT c; GetCursorPos(out c); Walk(c.X); }   // come see what you're doing
         else if (r < 0.96) Hop(0, -520 * S);
         else SetState(SIT, Rand(2, 5));
+    }
+
+    // ------------------------------------------------------------------ curious visits
+    // Every few minutes it walks (or jumps) to the window you're using and reacts to what it is,
+    // from the app name, title and URL the watcher already reads. Nothing is captured or sent anywhere.
+    static bool CuriousVisit()
+    {
+        DateTime now = DateTime.Now;
+        if (doing.Length > 0 && now >= doingUntil) doing = "";
+        if (!cfg.Curious || curiousT > 0 || orient != 0 || alert != null || sign != null || focusPhase == 1 || doing == "leave") return false;
+        IntPtr h; string proc, title, url;
+        lock (Sync) { h = fgHwnd; proc = fgProc; title = fgTitle; url = fgUrl; }
+        curiousT = doing == "work" || doing == "study" ? Rand(900, 1500) : doing == "break" ? Rand(90, 200) : Rand(180, 420);
+        if (h == IntPtr.Zero || h == hwnd || h != GetForegroundWindow()) return false;
+        string act = TextTools.Activity(proc, title, url);
+        if (act == "meeting") return false;                                     // never chirp during a call
+        bool changed = act != lastActivity; lastActivity = act;
+        curiousAsk = doing.Length == 0 && (act.Length == 0 || (changed && rnd.NextDouble() < 0.5));
+        curiousLine = curiousAsk ? "What are you up to?  (click me)" : TextTools.Comment(act, doing, rnd);
+        if (curiousLine == null) return false;
+        curiousAt = now;
+        if (!JumpOntoWindow())                                                  // hop onto its title bar, or walk underneath it
+        {
+            RECT r;
+            if (!Frame(h, out r)) { curiousLine = null; return false; }
+            Walk((r.L + r.R) / 2);
+        }
+        return true;
+    }
+
+    static void DeliverCurious()
+    {
+        string line = curiousLine; curiousLine = null;
+        if ((DateTime.Now - curiousAt).TotalSeconds > 20 || alert != null || sign != null) return;   // took too long getting there
+        lookY = -1;
+        if (curiousAsk)
+        {
+            Say(line, 12); askT = 12;
+            parts.Add(new Part { X = x + facing * 3 * U, Y = y - 14 * U, VY = -14 * S, Life = 1.6, Text = "?" });
+        }
+        else Say(line, 3.5);
+    }
+
+    static void AddDoingItems(IntPtr m)
+    {
+        string now = doing.Length == 0 ? "" : "  (now: " + doing + ")";
+        AppendMenu(m, GRAY, UIntPtr.Zero, "What are you doing?" + now);
+        AppendMenu(m, doing == "work" ? CHECK : 0, (UIntPtr)40, "Working");
+        AppendMenu(m, 0, (UIntPtr)41, "Working, start a focus timer");
+        AppendMenu(m, doing == "study" ? CHECK : 0, (UIntPtr)42, "Studying");
+        AppendMenu(m, doing == "break" ? CHECK : 0, (UIntPtr)43, "Taking a break");
+        AppendMenu(m, doing == "browse" ? CHECK : 0, (UIntPtr)44, "Just browsing");
+        AppendMenu(m, doing == "leave" ? CHECK : 0, (UIntPtr)45, "Leave me alone (1 hour)");
+    }
+
+    static void AskMenu()
+    {
+        askT = 0;
+        IntPtr m = CreatePopupMenu();
+        AddDoingItems(m);
+        IntPtr prev; int cmd = Popup(m, out prev);
+        Restore(prev);
+        if (cmd >= 40 && cmd <= 45) Answer(cmd);
+    }
+
+    static void Answer(int cmd)
+    {
+        DateTime now = DateTime.Now; askT = 0; bubbleT = 0;
+        switch (cmd)
+        {
+            case 40: doing = "work"; doingUntil = now.AddMinutes(45); curiousT = Rand(900, 1500); Say("Got it. I'll keep it down.", 2.5); break;
+            case 41:
+                doing = "work"; doingUntil = now.AddMinutes(cfg.Focus + cfg.Break); curiousT = Rand(900, 1500);
+                if (focusPhase == 0) { focusPhase = 1; focusEnd = now.AddMinutes(cfg.Focus); }
+                Say("Focus mode. I'm watching.", 2.5);
+                break;
+            case 42: doing = "study"; doingUntil = now.AddMinutes(45); curiousT = Rand(900, 1500); Say("Study hard! I'll guard you.", 2.5); break;
+            case 43: doing = "break"; doingUntil = now.AddMinutes(Math.Max(5, cfg.Break)); curiousT = Rand(60, 120); Say("Break time! Stretch those paws.", 2.5); Hearts(3); break;
+            case 44: doing = "browse"; doingUntil = now.AddMinutes(30); curiousT = Rand(240, 480); Say("Have fun. No doomscrolling!", 2.5); break;
+            case 45: doing = "leave"; doingUntil = now.AddHours(1); curiousT = 3600; Say("Okay. Quiet for an hour.", 2); return;
+        }
+        joyT = 1.2;
     }
 
     static void Walk(double t) { walkTarget = Clamp(t, MinX(), MaxX()); climbAfterWalk = false; SetState(WALK, 0); }
@@ -795,6 +884,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     {
         held = true; perch = IntPtr.Zero; ignorePerch = IntPtr.Zero; vx = vy = 0;
         orient = 0; climbNext = 0; hangSleep = false; climbAfterWalk = false;   // picked off the wall: upright again
+        curiousLine = null;
         if (alert != null) { alert = null; bubbleT = 0; }
         SetState(HELD, 0);
         Say("Wheee!", 1);
@@ -824,6 +914,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (state == SWIPE) return;
         if (sign != null) { ReminderDone(); return; }
         if (clipOfferT > 0 && clipText != null) { ClipMenu(); return; }
+        if (askT > 0) { AskMenu(); return; }
         if (state == SLEEP) { angryT = 1.5; Say("Hmph. I was napping.", 2); SetState(SIT, 2); return; }
         if (hangSleep) { hangSleep = false; angryT = 1.5; Say("Hmph. Bat nap ruined.", 2); SetState(HANG, 2); return; }
         joyT = 1.6; Hearts(3);
@@ -953,6 +1044,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
         AppendMenu(rm, pauseRecurring ? CHECK : 0, (UIntPtr)25, "Pause recurring");
         AppendMenu(rm, 0, (UIntPtr)24, "Edit reminders...");
         AppendMenu(m, POPUP, Sub(rm), "Reminders");
+        IntPtr dm = CreatePopupMenu();
+        AddDoingItems(dm);
+        AppendMenu(m, POPUP, Sub(dm), "What I'm doing");
         AppendMenu(m, SEP, UIntPtr.Zero, null);
         AppendMenu(m, 0, (UIntPtr)20, "Settings...");
         AppendMenu(m, auto ? CHECK : 0, (UIntPtr)21, "Start with Windows");
@@ -986,6 +1080,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
             case 23: DestroyWindow(hwnd); break;
             case 24: LoadReminders(); ShellExecute(IntPtr.Zero, "open", "notepad.exe", "\"" + RemPath + "\"", null, 1); break;
             case 25: pauseRecurring = !pauseRecurring; Say(pauseRecurring ? "Recurring reminders paused." : "Recurring reminders on.", 2); break;
+            case 40: case 41: case 42: case 43: case 44: case 45: Answer(cmd); break;
             case 30: if (sign != null) ReminderDone(); break;
             case 31: if (sign != null) ReminderSnooze(now.AddMinutes(5)); break;
             case 32: if (sign != null) ReminderSnooze(now.AddMinutes(15)); break;
@@ -1347,7 +1442,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static void BeginAlert(Bust b)
     {
         b.Scold = b.Label.Contains("Short") ? Scolds[0] : Scolds[1 + rnd.Next(Scolds.Length - 1)];
-        alert = b; bubbleT = 0;
+        alert = b; bubbleT = 0; curiousLine = null; askT = 0;
         if (orient != 0) LetGo(null);                                           // drops, then Land() sends it running
         else if (perch != IntPtr.Zero) HopDown();
         else if (state != AIR) SetState(RUN, 0);
@@ -1405,6 +1500,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 uint pid; GetWindowThreadProcessId(h, out pid);
                 string proc = ProcName(pid);
                 string url = Array.IndexOf(Browsers, proc) >= 0 ? reader.Read(h) : "";
+                lock (Sync) { fgHwnd = h; fgProc = proc; fgTitle = title; fgUrl = url; }
 
                 bool paused;
                 lock (Sync) paused = !patrol || DateTime.Now < snoozeUntil || DateTime.Now < cooldownUntil;
@@ -1657,12 +1753,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
             int phase = walking ? (int)(animT * (state == RUN ? 14 : 8)) % 2 : -1;
             for (int i = 0; i < 4; i++) Px(Legs[i], 7, 1, state == HELD ? 3 : (i % 2 == phase ? 1 : 2), body);
         }
-        double wob = (state == WALK || state == RUN || state == CLIMB) ? ((int)(animT * 8) % 2 == 0 ? -0.25 : 0.25) : 0;
-        int tip = sleeping ? LOGO : angry ? PINK : lastKeyAgo < 0.15 ? WHITE : STAR;
-        Px(3.5 + wob, dy - 1.5, 1, 1.5, body); Px(9.5 + wob, dy - 1.5, 1, 1.5, body);   // antennae
-        Px(3 + wob, dy - 2.5, 2, 1, tip); Px(9 + wob, dy - 2.5, 2, 1, tip);
-        Px(3, dy, 8, 1, body);                                                  // rounded head
-        Px(2, dy + 1, 10, 6, body);
+        Px(2, dy, 10, 7, body);
 
         bool up = joy || state == HELD || (sign != null && state != TYPE);   // holding up the reminder sign
         bool swipeRaised = state == SWIPE && stateT < 0.25, swipeStrike = state == SWIPE && stateT >= 0.25;
@@ -1825,6 +1916,14 @@ YouTube         | 240 | youtube.com/watch, - youtube
         var r3 = ParseReminder("2026-09-18 17:40 | call mom", n0);
         ok(r3 != null && r3.Kind == "once" && r3.Next == new DateTime(2026, 9, 18, 17, 40, 0));
         ok(ParseReminder("sometime | nope", n0) == null && ParseReminder("every 20m 09:00-18:00 | eyes", n0).From == 540);
+        ok(TextTools.Activity("Code", "main.py - Visual Studio Code", "") == "code");
+        ok(TextTools.Activity("chrome", "A Talk - YouTube", "youtube.com/watch?v=a") == "video");
+        ok(TextTools.Activity("chrome", "YouTube Music", "music.youtube.com/watch?v=a") == "music");
+        ok(TextTools.Activity("msedge", "Pull request #3", "github.com/a/b/pull/3") == "github");
+        ok(TextTools.Activity("chrome", "Meet - abc", "meet.google.com/abc-defg") == "meeting" && TextTools.Activity("Zoom", "Zoom Meeting", "") == "meeting");
+        ok(TextTools.Activity("explorer", "Downloads", "") == "files" && TextTools.Activity("explorer", "", "") == "");
+        ok(TextTools.Activity("chrome", "Some page", "example.org/x") == "browse" && TextTools.Activity("someapp", "Thing", "") == "");
+        ok(TextTools.Comment("video", "work", rnd) == "Weren't you working?" && TextTools.Comment("", "", rnd) == null && TextTools.Comment("code", "", rnd) != null);
         return fails;
     }
 
@@ -2169,6 +2268,84 @@ static class TextTools
             case "d": case "day": case "days": return 1440;
         }
         return 0;
+    }
+
+    // What the foreground window is, from its process name, title and URL. "" = no idea.
+    public static string Activity(string proc, string title, string url)
+    {
+        proc = (proc ?? "").ToLowerInvariant();
+        string t = (title ?? "").ToLowerInvariant(), u = (url ?? "").ToLowerInvariant(), hay = u + " | " + t;
+        if (Any(u, "meet.google.com", "zoom.us/", "teams.microsoft.com/l/meetup") || proc == "zoom" || proc == "cpthost"
+            || ((proc == "ms-teams" || proc == "teams") && Any(t, "meeting", "call"))) return "meeting";
+        if (Any(hay, "music.youtube.com", "open.spotify.com", "jiosaavn", "gaana.com")) return "music";
+        if (Any(u, "github.com", "gitlab.com", "bitbucket.org")) return "github";
+        if (Any(u, "stackoverflow.com", "stackexchange.com")) return "stackoverflow";
+        if (Any(u, "chatgpt.com", "claude.ai", "gemini.google.com", "copilot.microsoft.com", "perplexity.ai")) return "ai";
+        if (Any(u, "leetcode.com", "coursera.org", "udemy.com", "khanacademy.org", "geeksforgeeks.org", "w3schools.com", "wikipedia.org", "nptel", "hackerrank.com", "developer.mozilla.org")) return "learn";
+        if (Any(u, "mail.google.com", "outlook.live.com", "outlook.office.com")) return "mail";
+        if (Any(u, "docs.google.com/document", "notion.so")) return "docs";
+        if (Any(u, "docs.google.com/spreadsheets")) return "sheets";
+        if (Any(u, "docs.google.com/presentation", "canva.com")) return "slides";
+        if (Any(u, "web.whatsapp.com", "discord.com", "slack.com", "web.telegram.org", "messenger.com")) return "chat";
+        if (Any(u, "amazon.", "flipkart.com", "myntra.com", "meesho.com", "ebay.", "aliexpress")) return "shop";
+        if (Any(u, "linkedin.com", "x.com/", "twitter.com", "instagram.com", "facebook.com", "reddit.com", "threads.net")) return "social";
+        if (Any(u, "youtube.com", "netflix.com", "primevideo.com", "hotstar.com", "twitch.tv", "crunchyroll")) return "video";
+        switch (proc)
+        {
+            case "code": case "cursor": case "windsurf": case "devenv": case "pycharm64": case "idea64": case "webstorm64": case "rider64":
+            case "clion64": case "studio64": case "sublime_text": case "notepad++": case "zed": case "antigravity": case "arduino ide": return "code";
+            case "windowsterminal": case "wt": case "cmd": case "powershell": case "pwsh": case "conhost": case "mintty": case "openconsole": return "terminal";
+            case "winword": case "notepad": case "obsidian": case "onenote": case "wordpad": case "acrord32": case "acrobat": return "docs";
+            case "excel": return "sheets";
+            case "powerpnt": return "slides";
+            case "outlook": case "olk": case "thunderbird": return "mail";
+            case "whatsapp": case "whatsapp.root": case "discord": case "slack": case "telegram": case "ms-teams": case "teams": case "signal": return "chat";
+            case "spotify": return "music";
+            case "vlc": case "potplayer": case "mpc-hc64": case "obs64": return "video";
+            case "figma": case "photoshop": case "illustrator": case "blender": case "gimp-2.10": case "krita": case "inkscape": return "design";
+            case "steam": case "steamwebhelper": case "epicgameslauncher": case "riotclientservices": case "valorant": case "robloxplayerbeta": case "minecraft": return "game";
+            case "explorer": return t.Length > 0 ? "files" : "";
+        }
+        if (Array.IndexOf(new[] { "chrome", "msedge", "firefox", "brave", "opera", "vivaldi", "arc", "chromium", "librewolf", "zen", "opera_gx" }, proc) >= 0) return "browse";
+        return "";
+    }
+
+    static bool Any(string hay, params string[] needles)
+    {
+        foreach (var n in needles) if (hay.Contains(n)) return true;
+        return false;
+    }
+
+    // One short reaction for an activity. Knows when you said you were working or studying.
+    public static string Comment(string act, string doing, Random rnd)
+    {
+        if ((doing == "work" || doing == "study") && (act == "video" || act == "social" || act == "shop" || act == "game"))
+            return doing == "study" ? "Weren't you studying?" : "Weren't you working?";
+        string[] lines;
+        switch (act)
+        {
+            case "code": lines = new[] { "Writing code? Ship it!", "Need a rubber duck? I'm here.", "Remember to commit!" }; break;
+            case "terminal": lines = new[] { "Hacker mode: on.", "Careful with rm -rf!", "May your tests be green." }; break;
+            case "github": lines = new[] { "GitHub! Star something nice.", "Reviewing a pull request?" }; break;
+            case "stackoverflow": lines = new[] { "Stack Overflow to the rescue!", "Copy, paste... understand?" }; break;
+            case "ai": lines = new[] { "Asking an AI? I have opinions too.", "Say please to the robot." }; break;
+            case "learn": lines = new[] { "Learning something new? Proud of you.", "Study mode!" }; break;
+            case "docs": lines = new[] { "Writing something great?", "The words are flowing!" }; break;
+            case "sheets": lines = new[] { "Spreadsheet wizardry!", "=SUM(snacks)" }; break;
+            case "slides": lines = new[] { "Slide deck time. Fancy!", "Big presentation coming?" }; break;
+            case "mail": lines = new[] { "Inbox zero today?", "Emails, emails..." }; break;
+            case "chat": lines = new[] { "Say hi from me!", "Chatting? Don't forget your task." }; break;
+            case "video": lines = new[] { "Ooh, what are we watching?", "Popcorn time?" }; break;
+            case "music": lines = new[] { "Nice tunes!", "Turn it up!" }; break;
+            case "design": lines = new[] { "Ooh, pretty pixels!", "Make it pop!" }; break;
+            case "game": lines = new[] { "Game time! Have fun.", "Go win one for me!" }; break;
+            case "shop": lines = new[] { "Adding to cart again?", "Need it, or want it?" }; break;
+            case "social": lines = new[] { "Just a quick peek, right?", "Scrolling? Stay focused!" }; break;
+            case "files": lines = new[] { "Tidying up files?", "Looking for something?" }; break;
+            case "browse": lines = new[] { "What are you reading?", "Interesting page?" }; break;
+            default: return null;
+        }
+        return lines[rnd.Next(lines.Length)];
     }
 
     // "5pm", "5 pm", "5:30pm", "17:30". A bare "5" is not a time.

@@ -1,9 +1,7 @@
 # Writes app.ico (16/32/48/64) of the pixel pet, no dependencies.
 import struct, sys
 
-GRID = ["...YY....YY...",
-        "....X....X....",
-        "...XXXXXXXX...",
+GRID = ["..XXXXXXXXXX..",
         "..XXXXXXXXXX..",
         "..XXEXXXXEXX..",
         "..XXEXXXXEXX..",
@@ -12,7 +10,7 @@ GRID = ["...YY....YY...",
         "..XXXXXXXXXX..",
         "...X.X..X.X...",
         "...X.X..X.X..."]
-COL = {"X": (182, 196, 46, 255), "E": (20, 20, 20, 255), "Y": (48, 216, 255, 255)}  # BGRA
+COL = {"X": (87, 119, 217, 255), "E": (20, 20, 20, 255)}  # BGRA
 
 
 def image(n):

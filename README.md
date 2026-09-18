@@ -16,7 +16,9 @@ PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no de
 **A pet that lives on your screen**
 - It walks along the taskbar, jumps onto the title bar of the window you're using and rides along when you move that window. It falls off when the window is minimised, maximised, closed or covered.
 - You can drag it and throw it. It falls with gravity, bounces off the screen edges and can land on windows.
-- It takes naps, follows your cursor with its eyes and sometimes walks over to see what you're doing.
+- It climbs the screen edges and walks upside-down along the top.
+- It takes naps and follows your cursor with its eyes.
+- **Curious visits:** every few minutes it hops onto (or walks under) the window you're using and reacts to what it is: code editors, terminals, GitHub, docs, mail, chat, video, music, games, shopping and more. Sometimes it asks "What are you up to?". Click it to answer from a quick menu (Working, Studying, Taking a break, Just browsing, Leave me alone). If you say you're working it gets quieter, and it nudges you if you drift to video or social media. It stays silent during meetings and focus sessions. It only uses the app name, window title and URL it already reads; nothing is captured or sent anywhere (`curious = no` turns it off).
 - Clicking it counts as a pat and gives XP; closing a doomscroll tab and finishing reminders give XP too. Your level is saved.
 - When you type, it pulls out a laptop and taps along. It spots typing without a keyboard hook and never records which keys you press (see [Privacy](#privacy)).
 - Press Enter and it throws a rope at your text caret, or at the mouse pointer if the app doesn't expose a caret.
@@ -151,6 +153,8 @@ Measured on a Windows 11 laptop: **3-5 MB private working set** and **about 0-1 
 ## Credits
 
 PixelPet Focus is a native rewrite inspired by [BadKat / FocusCat](https://github.com/X-DIABLO-X/badkat) by X-DIABLO-X (MIT licensed). The default rule set and the approach of matching URL, title and process with a grace time per site come from that project. Its license notice is included in [LICENSE](LICENSE).
+
+The pixel pet's look is a fan tribute to the Claude Code mascot. This is an unofficial personal project and is not affiliated with or endorsed by Anthropic.
 
 ## License
 
