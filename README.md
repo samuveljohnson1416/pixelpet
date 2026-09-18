@@ -41,8 +41,9 @@ PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no de
 - `every` reminders skip while you've been away for more than 5 minutes. During a focus session they wait for your break.
 - No reminder pops up while a fullscreen app, game or presentation is running. They wait until it ends.
 
-**Settings are plain text files**
-- `rules.txt` and `reminders.txt` open in Notepad from the menu. Changes apply within a second of saving. Changing `size` or `hotkey` needs a restart.
+**Settings**
+- **Settings...** in the menu opens a small native window: add, edit, reorder or remove site rules, edit the never-touch list, and flip every toggle. Launching the exe a second time also opens it.
+- Everything is still saved as plain text (`rules.txt`), so you can hand-edit it too. `reminders.txt` opens in Notepad from the Reminders menu. Changes apply within a second of saving. Changing `size` or `hotkey` needs a restart.
 
 ## Install
 
@@ -67,7 +68,7 @@ Settings and progress are saved in `%APPDATA%\PixelPet Focus`. To have it start 
 | Ctrl+Alt+R | Opens the clipboard menu. |
 | Enter | Throws the rope at your caret (`enterrope = yes`). |
 
-The menu shows your level, battery and audio status. It also has: start/stop the focus timer, snooze or resume the patrol, **On patrol** (turns closing on or off), nap now, the **Clipboard** and **Reminders** submenus, **Edit rules...**, **Start with Windows**, hide/show the pet, and **Quit**.
+The menu shows your level, battery and audio status. It also has: start/stop the focus timer, snooze or resume the patrol, **On patrol** (turns closing on or off), nap now, the **Clipboard** and **Reminders** submenus, **Settings...**, **Start with Windows**, hide/show the pet, and **Quit**.
 
 ### rules.txt
 

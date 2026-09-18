@@ -16,7 +16,7 @@ class Rule { public string Label; public int Grace; public string[] Any; }
 class Cfg
 {
     public int Countdown = 3, Snooze = 5, Focus = 25, Break = 5;
-    public bool Nag, Wander = true, Sleepy = true, Typing = true, EnterRope = true, Audio = true, Clipboard = true, Hotkey = true;
+    public bool Nag, Wander = true, Sleepy = true, Typing = true, EnterRope = true, Climb = true, Audio = true, Clipboard = true, Hotkey = true;
     public double Size = 1;
     public string[] Never = new string[0];
     public Rule[] Rules = new Rule[0];
@@ -40,6 +40,7 @@ wander = yes       # walk around, jump on windows
 sleepy = yes       # take naps
 typing = yes       # pulls out a laptop while you type (never records keys)
 enterrope = yes    # throws a rope at your caret/cursor when you press Enter
+climb = yes        # climbs the screen edges and walks upside-down along the top
 clipboard = yes    # notices useful copied text (times, links, sums); ignores passwords
 hotkey = yes       # Ctrl+Alt+R opens the clipboard menu (restart to apply)
 audio = yes        # wears headphones when they're connected; dances to music, takes notes in class/calls
@@ -117,6 +118,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                     case "sleepy": c.Sleepy = yes; break;
                     case "typing": c.Typing = yes; break;
                     case "enterrope": c.EnterRope = yes; break;
+                    case "climb": c.Climb = yes; break;
                     case "clipboard": c.Clipboard = yes; break;
                     case "hotkey": c.Hotkey = yes; break;
                     case "audio": c.Audio = yes; break;
@@ -173,7 +175,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static int watchX;
 
     // ------------------------------------------------------------------ pet state (UI thread only)
-    const int SIT = 0, WALK = 1, SLEEP = 2, AIR = 3, HELD = 4, RUN = 5, GLARE = 6, SWIPE = 7, TYPE = 8;
+    const int SIT = 0, WALK = 1, SLEEP = 2, AIR = 3, HELD = 4, RUN = 5, GLARE = 6, SWIPE = 7, TYPE = 8, CLIMB = 9, HANG = 10;
     static IntPtr hwnd, mdc;
     static int W, H, U; static double S;
     static RECT wa;
@@ -202,6 +204,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static string clipText, clipMsg; static DateTime clipWhen; static double clipOfferT; static uint ownSeq, fmtExclude, fmtHistory, fmtIgnore;
     static int clipRetry, gcSec; static bool hintShown; static string tagCache; static IntPtr trayIcon;
     static readonly int[] Legs = { 3, 5, 8, 10 };
+    // climbing: which surface the feet are on (0 floor, 1 left edge, 2 right edge, 3 top edge, upside down).
+    // x,y is always the contact point; on a wall y runs along it, on the top edge x does.
+    static int orient, climbNext; static double climbTarget; static bool climbUp, climbAfterWalk, hangSleep;
     static readonly StringBuilder clsBuf = new StringBuilder(64);
     static readonly string[] Codes = { "{ }", "01", ";", "</>", "#", "=>", "()" };
     static double secAcc;
@@ -218,7 +223,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     {
         if (args.Length > 0 && args[0] == "--selftest") { Environment.Exit(SelfTest()); }
         bool created; var mutex = new Mutex(true, "PixelPetFocus.Single", out created);
-        if (!created) return;
+        if (!created) { PostMessage(FindWindow("PixelPetFocus", null), 0x8003, IntPtr.Zero, IntPtr.Zero); return; }   // 2nd launch: open Settings
 
         SetProcessDPIAware();
         S = GetDpiForSystem() / 96.0;
@@ -291,6 +296,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         switch (m)
         {
             case 0x0113: Tick(); return IntPtr.Zero;                   // WM_TIMER
+            case 0x8003: OpenSettings(); return IntPtr.Zero;              // from a second launch
             case 0x0021: return (IntPtr)3;                             // WM_MOUSEACTIVATE -> MA_NOACTIVATE
             case 0x0014: return (IntPtr)1;                             // WM_ERASEBKGND
             case 0x000F: if (h == ropeWnd) PaintRope(); else Render(); break;   // WM_PAINT (DefWindowProc validates)
@@ -350,6 +356,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         Bust b; double wr; int wx;
         lock (Sync) { b = pendingBust; pendingBust = null; wr = watchRemaining; wx = watchX; }
         if (b != null && alert == null && state != HELD) BeginAlert(b);
+        if (orient != 0 && sign != null && state != AIR && state != HELD) LetGo(null);   // come down to show the sign
         bool eyeing = alert == null && wr > 0 && wr <= 5;                       // it notices before it acts
         if (eyeing && state == WALK) SetState(SIT, 2);
 
@@ -389,6 +396,12 @@ YouTube         | 240 | youtube.com/watch, - youtube
         lookX = !near ? (state == WALK ? facing : 0) : lx > x + 4 * U ? 1 : lx < x - 4 * U ? -1 : 0;
         lookY = near && ly < y - 12 * U ? -1 : 0;
         if (state == TYPE) lookX = lookY = 0;                                   // eyes on the screen
+        if (orient == 1 || orient == 2)                                         // on a wall the face turns sideways
+        {
+            bool upward = state == CLIMB ? climbUp : c.Y < y;
+            lookX = (orient == 1) == upward ? 1 : -1; lookY = 0;
+        }
+        else if (orient == 3) lookY = c.Y > y + 12 * U ? -1 : 0;                // hanging: peek down at the cursor
 
         Ride();
         switch (state)
@@ -397,7 +410,16 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 if (stateT >= stateDur && sign == null) ChooseNext();          // a reminder sign keeps it put
                 break;
             case WALK:
-                if (Step(walkTarget, 55 * S * Math.Max(0.5, cfg.Size), dt)) SetState(SIT, Rand(2, 6));
+                if (Step(walkTarget, 55 * S * Math.Max(0.5, cfg.Size), dt))
+                {
+                    if (climbAfterWalk) { climbAfterWalk = false; StartClimb(walkTarget <= (wa.L + wa.R) / 2); }
+                    else SetState(SIT, Rand(2, 6));
+                }
+                break;
+            case CLIMB: Climb(dt); break;
+            case HANG:
+                if (hangSleep && (zT -= dt) <= 0) { zT = 1.3; parts.Add(new Part { X = x + (orient == 2 ? -12 : 12) * U, Y = y + (orient == 3 ? 6 : -2) * U, VY = -22 * S, Life = 1.8, Text = "z" }); }
+                if (stateT >= stateDur && sign == null) HangNext();
                 break;
             case SLEEP:
                 zT -= dt;
@@ -455,8 +477,10 @@ YouTube         | 240 | youtube.com/watch, - youtube
             if (p.Life <= 0 || parts.Count > 40) parts.RemoveAt(i);
         }
 
-        int wl = Clamp((int)Math.Round(x) - W / 2, wa.L, wa.R - W);
-        int wt = (int)Math.Round(y) + U - H;
+        int rx = (int)Math.Round(x), ry = (int)Math.Round(y);
+        int wl = orient == 1 ? rx - U : orient == 2 ? rx + U - W : rx - W / 2;
+        int wt = orient == 1 || orient == 2 ? ry - H / 2 : orient == 3 ? ry - U : ry + U - H;
+        wl = Clamp(wl, wa.L, wa.R - W);
         if (wl != winLeft || wt != winTop) { SetWindowPos(hwnd, IntPtr.Zero, wl, wt, 0, 0, 0x15); winLeft = wl; winTop = wt; }
         if (ropeT >= 0) DrawRope();
         Render();
@@ -587,12 +611,105 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (r < 0.35 && cfg.Wander) Walk(Rand(MinX(), MaxX()));
         else if (r < 0.5 && cfg.Sleepy) SetState(SLEEP, Rand(12, 30));
         else if (r < 0.72 && cfg.Wander && JumpOntoWindow()) { }
-        else if (r < 0.87 && cfg.Wander) { POINT c; GetCursorPos(out c); Walk(c.X); }   // come see what you're doing
-        else if (r < 0.95) Hop(0, -520 * S);
+        else if (r < 0.82 && cfg.Wander && cfg.Climb) GoClimb();
+        else if (r < 0.9 && cfg.Wander) { POINT c; GetCursorPos(out c); Walk(c.X); }   // come see what you're doing
+        else if (r < 0.96) Hop(0, -520 * S);
         else SetState(SIT, Rand(2, 5));
     }
 
-    static void Walk(double t) { walkTarget = Clamp(t, MinX(), MaxX()); SetState(WALK, 0); }
+    static void Walk(double t) { walkTarget = Clamp(t, MinX(), MaxX()); climbAfterWalk = false; SetState(WALK, 0); }
+
+    // ------------------------------------------------------------------ climbing the screen edges
+    static void GoClimb()
+    {
+        if (perch != IntPtr.Zero) return;
+        bool left = x - wa.L < wa.R - x;
+        Walk(left ? MinX() : MaxX());
+        climbAfterWalk = true;
+    }
+
+    static void StartClimb(bool left)
+    {
+        perch = IntPtr.Zero; orient = left ? 1 : 2;
+        x = left ? wa.L : wa.R; y = wa.B - 7 * U;
+        bool toTop = rnd.NextDouble() < 0.5;
+        climbTarget = toTop ? wa.T + 7 * U : Rand(wa.T + 20 * U, wa.B - 25 * U);
+        climbNext = toTop ? 1 : 0;
+        SetState(CLIMB, 0);
+    }
+
+    static void Climb(double dt)
+    {
+        double speed = 45 * S;
+        if (orient == 3)
+        {
+            if (!Step(climbTarget, speed, dt)) return;
+            if (climbNext == 2)                                                 // round the top corner and head down
+            {
+                orient = x < (wa.L + wa.R) / 2 ? 1 : 2; x = orient == 1 ? wa.L : wa.R;
+                y = wa.T + 7 * U; climbTarget = wa.B - 7 * U; climbNext = 3;
+            }
+            else SetState(HANG, Rand(2, 5));
+            return;
+        }
+        double d = climbTarget - y;
+        climbUp = d < 0;
+        if (Math.Abs(d) > speed * dt) { y += (d > 0 ? 1 : -1) * speed * dt; return; }
+        y = climbTarget;
+        bool left = orient == 1;
+        if (climbNext == 1)                                                     // over the top edge, upside down
+        {
+            orient = 3; x = left ? wa.L + 7 * U : wa.R - 7 * U; y = wa.T; facing = left ? 1 : -1;
+            climbTarget = Rand(wa.L + 25 * U, wa.R - 25 * U); climbNext = 0;
+        }
+        else if (climbNext == 3)                                                // back on the floor
+        {
+            orient = 0; climbNext = 0; x = left ? wa.L + 8 * U : wa.R - 8 * U; y = wa.B;
+            SetState(SIT, Rand(2, 4));
+        }
+        else SetState(HANG, Rand(2, 5));
+    }
+
+    static void HangNext()
+    {
+        hangSleep = false;
+        double r = rnd.NextDouble();
+        if (orient == 3)
+        {
+            if (r < 0.35) { climbTarget = Rand(wa.L + 20 * U, wa.R - 20 * U); climbNext = 0; SetState(CLIMB, 0); }
+            else if (r < 0.55 && cfg.Sleepy) { hangSleep = true; SetState(HANG, Rand(10, 20)); }   // bat nap
+            else if (r < 0.8) LetGo("Wheee!");
+            else { climbTarget = x < (wa.L + wa.R) / 2 ? wa.L + 7 * U : wa.R - 7 * U; climbNext = 2; SetState(CLIMB, 0); }
+            return;
+        }
+        if (r < 0.3) { climbTarget = wa.T + 7 * U; climbNext = 1; SetState(CLIMB, 0); }
+        else if (r < 0.5) { climbTarget = Rand(wa.T + 7 * U, wa.B - 20 * U); climbNext = 0; SetState(CLIMB, 0); }
+        else if (r < 0.75) { climbTarget = wa.B - 7 * U; climbNext = 3; SetState(CLIMB, 0); }
+        else LetGo("Wheee!");
+    }
+
+    // Let go of a wall or the top edge: back to upright, then gravity does the rest.
+    static void LetGo(string say)
+    {
+        if (orient == 1) x = wa.L + 8 * U; else if (orient == 2) x = wa.R - 8 * U; else if (orient == 3) y = wa.T + 10 * U;
+        vx = orient == 1 ? 120 * S : orient == 2 ? -120 * S : 0; vy = 0;
+        orient = 0; climbNext = 0; hangSleep = false; climbAfterWalk = false;
+        if (say != null) Say(say, 1.2);
+        SetState(AIR, 0);
+    }
+
+    // Thrown hard enough into a screen edge, it grabs on instead of bouncing.
+    static bool GrabEdge(double minX, double maxX)
+    {
+        bool left = x < minX && vx < -700 * S, right = x > maxX && vx > 700 * S, top = y < wa.T + 10 * U && vy < -900 * S;
+        if (!cfg.Climb || (!left && !right && !top)) return false;
+        sqK = 0.6; sqT = 0.25; vx = vy = 0; climbNext = 0; perch = IntPtr.Zero;
+        if (top && !left && !right) { orient = 3; x = Clamp(x, wa.L + 7 * U, wa.R - 7 * U); y = wa.T; }
+        else { orient = left ? 1 : 2; x = left ? wa.L : wa.R; y = Clamp(y - 5 * U, wa.T + 7 * U, wa.B - 7 * U); }
+        Say("Gotcha!", 1.2);
+        SetState(HANG, Rand(1.5, 3));
+        return true;
+    }
     static void Hop(double hvx, double hvy) { vx = hvx; vy = hvy; perch = IntPtr.Zero; SetState(AIR, 0); }
     static void HopDown()
     {
@@ -606,6 +723,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         double prevY = y, g = 2600 * S;
         vy += g * dt; x += vx * dt; y += vy * dt;
         double minX = wa.L + 8 * U, maxX = wa.R - 8 * U;
+        if (GrabEdge(minX, maxX)) return;
         if (x < minX) { x = minX; vx = -vx * 0.5; }
         if (x > maxX) { x = maxX; vx = -vx * 0.5; }
         if (y < wa.T + 10 * U) { y = wa.T + 10 * U; if (vy < 0) vy = 0; }
@@ -676,6 +794,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static void StartHold()
     {
         held = true; perch = IntPtr.Zero; ignorePerch = IntPtr.Zero; vx = vy = 0;
+        orient = 0; climbNext = 0; hangSleep = false; climbAfterWalk = false;   // picked off the wall: upright again
         if (alert != null) { alert = null; bubbleT = 0; }
         SetState(HELD, 0);
         Say("Wheee!", 1);
@@ -706,8 +825,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (sign != null) { ReminderDone(); return; }
         if (clipOfferT > 0 && clipText != null) { ClipMenu(); return; }
         if (state == SLEEP) { angryT = 1.5; Say("Hmph. I was napping.", 2); SetState(SIT, 2); return; }
+        if (hangSleep) { hangSleep = false; angryT = 1.5; Say("Hmph. Bat nap ruined.", 2); SetState(HANG, 2); return; }
         joyT = 1.6; Hearts(3);
-        if (state != AIR && state != TYPE) Hop(0, -420 * S);
+        if (state != AIR && state != TYPE && orient == 0) Hop(0, -420 * S);
         if ((DateTime.Now - lastPat).TotalSeconds >= 4) { lastPat = DateTime.Now; Award(5); }
     }
 
@@ -725,6 +845,13 @@ YouTube         | 240 | youtube.com/watch, - youtube
         parts.Add(new Part { X = x, Y = y - 11 * U, VY = -40 * S, Life = 1.4, Text = "+" + n + " XP" });
         if (gained > 0) { Say("Level " + level + "!", 3); joyT = 3; Hearts(6); }
     }
+
+    // hooks for the Settings window (Settings.cs runs on its own thread; cfg is volatile, patrol is volatile)
+    internal static void OpenSettings() { Settings.Show(RulesPath, cfg, ApplySaved); }
+    static void ApplySaved(Cfg c) { cfg = c; }
+    internal static bool PatrolFlag(bool? set) { if (set.HasValue) patrol = set.Value; return patrol; }
+    internal static bool AutoStartFlag(bool? set) { return AutoStart(set); }
+    internal static Rule[] DefaultRuleSet() { return Parse(DefaultRules.Split('\n')).Rules; }
 
     static void ToggleHidden() { hidden = !hidden; ShowWindow(hwnd, hidden ? 0 : 4); }
 
@@ -807,6 +934,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         AppendMenu(m, 0, (UIntPtr)11, snoozing ? "Resume patrol (snoozed until " + until.ToString("HH:mm", Inv) + ")" : "Snooze patrol " + cfg.Snooze + " min");
         AppendMenu(m, patrol ? CHECK : 0, (UIntPtr)12, "On patrol");
         AppendMenu(m, 0, (UIntPtr)13, state == SLEEP ? "Wake up" : "Nap now");
+        if (cfg.Climb) AppendMenu(m, 0, (UIntPtr)26, orient != 0 ? "Come down" : "Climb the wall");
         AppendMenu(m, SEP, UIntPtr.Zero, null);
         IntPtr clip = CreatePopupMenu();
         ReadClipboard(false);
@@ -826,7 +954,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         AppendMenu(rm, 0, (UIntPtr)24, "Edit reminders...");
         AppendMenu(m, POPUP, Sub(rm), "Reminders");
         AppendMenu(m, SEP, UIntPtr.Zero, null);
-        AppendMenu(m, 0, (UIntPtr)20, "Edit rules...");
+        AppendMenu(m, 0, (UIntPtr)20, "Settings...");
         AppendMenu(m, auto ? CHECK : 0, (UIntPtr)21, "Start with Windows");
         AppendMenu(m, 0, (UIntPtr)22, hidden ? "Show pet" : "Hide pet");
         AppendMenu(m, SEP, UIntPtr.Zero, null);
@@ -847,7 +975,12 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 break;
             case 12: patrol = !patrol; Say(patrol ? "On patrol." : "Off duty.", 2); break;
             case 13: if (state == SLEEP) SetState(SIT, 2); else if (state == SIT || state == WALK) SetState(SLEEP, 45); break;
-            case 20: ShellExecute(IntPtr.Zero, "open", "notepad.exe", "\"" + RulesPath + "\"", null, 1); break;
+            case 20: OpenSettings(); break;
+            case 26:
+                if (orient != 0) { if (state == CLIMB || state == HANG) LetGo("Okay, okay."); }
+                else if (perch != IntPtr.Zero) HopDown();
+                else if (state == SIT || state == WALK || state == SLEEP) { GoClimb(); Say("To the wall!", 1.5); }
+                break;
             case 21: AutoStart(!auto); break;
             case 22: ToggleHidden(); break;
             case 23: DestroyWindow(hwnd); break;
@@ -1215,7 +1348,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
     {
         b.Scold = b.Label.Contains("Short") ? Scolds[0] : Scolds[1 + rnd.Next(Scolds.Length - 1)];
         alert = b; bubbleT = 0;
-        if (perch != IntPtr.Zero) HopDown();
+        if (orient != 0) LetGo(null);                                           // drops, then Land() sends it running
+        else if (perch != IntPtr.Zero) HopDown();
         else if (state != AIR) SetState(RUN, 0);
     }
 
@@ -1481,12 +1615,22 @@ YouTube         | 240 | youtube.com/watch, - youtube
 
     static void Box(int l, int t, int w, int h, int color) { var r = new RECT { L = l, T = t, R = l + w, B = t + h }; FillRect(mdc, ref r, Brush(color)); }
 
-    // one sprite cell: 14 columns x 9 rows, feet on row 9, squashed about the bottom centre
+    // one sprite cell: 14 columns x 9 rows, feet on row 9, squashed about the contact point (cx, by).
+    // orient rotates the whole grid in 90-degree steps, so pixel art stays crisp on walls and upside down.
     static void Px(double col, double row, double w, double h, int color)
     {
-        int x0 = (int)Math.Round(cx + (col - 7) * U * sx), x1 = (int)Math.Round(cx + (col + w - 7) * U * sx);
-        int y0 = (int)Math.Round(by - (9 - row) * U * sy), y1 = (int)Math.Round(by - (9 - row - h) * U * sy);
-        Box(x0, y0, x1 - x0, y1 - y0, color);
+        double a0 = (col - 7) * U * sx, a1 = (col + w - 7) * U * sx;           // across the body
+        double d0 = (9 - row) * U * sy, d1 = (9 - row - h) * U * sy;           // away from the surface
+        double X0, X1, Y0, Y1;
+        switch (orient)
+        {
+            case 1: X0 = cx + d0; X1 = cx + d1; Y0 = by - a0; Y1 = by - a1; break;   // left edge
+            case 2: X0 = cx - d0; X1 = cx - d1; Y0 = by + a0; Y1 = by + a1; break;   // right edge
+            case 3: X0 = cx + a0; X1 = cx + a1; Y0 = by + d0; Y1 = by + d1; break;   // top edge
+            default: X0 = cx + a0; X1 = cx + a1; Y0 = by - d0; Y1 = by - d1; break;  // floor
+        }
+        int l = (int)Math.Round(Math.Min(X0, X1)), t = (int)Math.Round(Math.Min(Y0, Y1));
+        Box(l, t, (int)Math.Round(Math.Max(X0, X1)) - l, (int)Math.Round(Math.Max(Y0, Y1)) - t, color);
     }
 
     static void Render()
@@ -1500,20 +1644,20 @@ YouTube         | 240 | youtube.com/watch, - youtube
         bool vibing = lastKind == 1 && (state == SIT || state == TYPE) && danceLevel > 0.04;
         if (vibing) { double d = Math.Min(1, danceLevel * 1.6); sx *= 1 + 0.07 * d; sy *= 1 - 0.11 * d; }
 
-        bool sleeping = state == SLEEP;
+        bool sleeping = state == SLEEP || hangSleep;
         bool angry = angryT > 0 || state == RUN || state == GLARE || state == SWIPE;
         bool joy = (joyT > 0 || (vibing && state == SIT)) && !angry;
         int body = angry ? ANGRY : onAC && chargeT > 2.3 && (int)(animT * 10) % 2 == 0 ? STAR : CORAL;   // zap flash on plug-in
         bool typing = state == TYPE;
-        int dy = sleeping || typing ? 2 : 0;
+        int dy = state == SLEEP || typing ? 2 : 0;
 
         if (dy == 0)
         {
-            bool walking = state == WALK || state == RUN;
+            bool walking = state == WALK || state == RUN || state == CLIMB;
             int phase = walking ? (int)(animT * (state == RUN ? 14 : 8)) % 2 : -1;
             for (int i = 0; i < 4; i++) Px(Legs[i], 7, 1, state == HELD ? 3 : (i % 2 == phase ? 1 : 2), body);
         }
-        double wob = (state == WALK || state == RUN) ? ((int)(animT * 8) % 2 == 0 ? -0.25 : 0.25) : 0;
+        double wob = (state == WALK || state == RUN || state == CLIMB) ? ((int)(animT * 8) % 2 == 0 ? -0.25 : 0.25) : 0;
         int tip = sleeping ? LOGO : angry ? PINK : lastKeyAgo < 0.15 ? WHITE : STAR;
         Px(3.5 + wob, dy - 1.5, 1, 1.5, body); Px(9.5 + wob, dy - 1.5, 1, 1.5, body);   // antennae
         Px(3 + wob, dy - 2.5, 2, 1, tip); Px(9 + wob, dy - 2.5, 2, 1, tip);
@@ -1537,6 +1681,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
             up = false; leftBusy = rightBusy = true;
         }
         bool leftUp = up, rightUp = up;
+        if (state == CLIMB) { leftUp = (int)(animT * 8) % 2 == 0; rightUp = !leftUp; }   // paw over paw
         if (vibing && joyT <= 0 && state == SIT) { leftUp = (int)(animT * 2.5) % 2 == 0; rightUp = !leftUp; }   // arms sway to the music
         bool notes = lastKind == 2 && state == SIT && alert == null;
         if (notes) leftBusy = true;                                             // left paw holds the notepad
@@ -1567,7 +1712,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         }
 
         sx = sy = 1;
-        if (chargeT > 0 && onAC && dy == 0) { Px(-9, 8.4, 8, 0.6, DARK); Px(-1.6, 7.6, 1.8, 1.5, INK); Px(0.2, 7.9, 0.7, 0.3, STAR); Px(0.2, 8.5, 0.7, 0.3, STAR); }   // plugged in
+        if (chargeT > 0 && onAC && dy == 0 && orient == 0) { Px(-9, 8.4, 8, 0.6, DARK); Px(-1.6, 7.6, 1.8, 1.5, INK); Px(0.2, 7.9, 0.7, 0.3, STAR); Px(0.2, 8.5, 0.7, 0.3, STAR); }   // plugged in
         if (chargeT > 0) DrawBattery();
         int hp = Math.Max(2, U / 2);
         foreach (var p in parts)
@@ -1582,7 +1727,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
             else Outlined(p.Text, px, py);
         }
 
-        double top = by - (dy > 0 ? 10 : 12) * U - 6 * S;
+        double top = orient == 3 ? H - 2 : orient != 0 ? by - 8 * U : by - (dy > 0 ? 10 : 12) * U - 6 * S;
         if (bubbleT > 0 && bubble != null) Pill(bubble, (int)top, bubbleSign ? SIGN : WHITE, DARK);
         else if (tagCache != null) Pill(tagCache, (int)top, DARK, WHITE);
 
@@ -1755,6 +1900,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     [DllImport("user32.dll")] static extern IntPtr SetCapture(IntPtr h);
     [DllImport("user32.dll")] static extern bool ReleaseCapture();
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindow(string cls, string title);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder sb, int n);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder sb, int n);
