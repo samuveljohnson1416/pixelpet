@@ -17,7 +17,7 @@ class Rule { public string Label; public int Grace; public string[] Any; }
 class Cfg
 {
     public int Countdown = 3, Snooze = 5, Focus = 25, Break = 5, Stretch = 90;
-    public bool Claude = true;
+    public bool Claude = true, Push = true, Quiet;
     public bool Nag, Wander = true, Sleepy = true, Typing = true, EnterRope = true, Climb = true, Audio = true, Clipboard = true, Hotkey = true, Curious = true, WebTravel = true;
     public double Size = 1;
     public string[] Never = new string[0];
@@ -55,6 +55,8 @@ focus = 25         # focus timer minutes
 break = 5          # break minutes
 stretch = 90       # nudge to stretch after this many minutes of non-stop activity (0 = off)
 claude = yes       # reacts when Claude Code works, needs you, or finishes (connect it from the menu)
+push = yes         # nudges windows around like furniture now and then; throw it at a window to knock it aside
+quiet = no         # yes = barely talks: still visits and reacts, keeps chit-chat to a minimum
 
 # Never touch: any window containing one of these is left alone
 never | zoom meeting, microsoft teams, google meet
@@ -123,6 +125,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
                     case "break": c.Break = Math.Max(1, n); break;
                     case "stretch": c.Stretch = Math.Max(0, n); break;
                     case "claude": c.Claude = yes; break;
+                    case "push": c.Push = yes; break;
+                    case "quiet": c.Quiet = yes; break;
                     case "mode": c.Nag = v == "nag"; break;
                     case "wander": c.Wander = yes; break;
                     case "sleepy": c.Sleepy = yes; break;
@@ -187,7 +191,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static int watchX;
 
     // ------------------------------------------------------------------ pet state (UI thread only)
-    const int SIT = 0, WALK = 1, SLEEP = 2, AIR = 3, HELD = 4, RUN = 5, GLARE = 6, SWIPE = 7, TYPE = 8, CLIMB = 9, HANG = 10, SWING = 11;
+    const int SIT = 0, WALK = 1, SLEEP = 2, AIR = 3, HELD = 4, RUN = 5, GLARE = 6, SWIPE = 7, TYPE = 8, CLIMB = 9, HANG = 10, SWING = 11, PUSH = 12;
     static IntPtr hwnd, mdc;
     static int W, H, U; static double S;
     static RECT wa;
@@ -230,6 +234,14 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static DateTime lastAgentXp; static int activeSec;
     static int closes, pats, focusDone, remDone, clipActs, claudeDone, streak, bestStreak, ach; static DateTime lastDay; static bool nightOwl;
     const int CAP = 0xC86E3C, HEADBAND = 0x3C3CDC;
+    static string MemPath; static readonly List<string> memTail = new List<string>();     // the last few memories, for the menu
+    static int[] today = new int[7]; static DateTime todayDate, met;                       // today: closes, pats, focus, reminders, clipboard, claude, late
+    static readonly List<string> hist = new List<string>();                                // "yyyyMMdd:c,p,f,r,x,k,l" for up to 13 past days
+    static bool traitFocused, traitLoved, traitOwl, traitGuard, traitBuddy, traitsReady;
+    static IntPtr pushTarget; static double pushAt, pushLeft, pushAcc, pushed; static int pushDir; static RECT pushRect; static DateTime lastPush, diskWarned;
+    static readonly List<IntPtr> enumList = new List<IntPtr>();
+    static readonly EnumWindowsProc collectCb = CollectCb;
+    static readonly string[] PushLines = { "There. Much better.", "Rearranging the furniture.", "Tidy desk, tidy mind.", "Hnngh... done!" };
     static readonly string[] AchNames = { "First patrol", "Doomscroll slayer", "Deep focus", "Focus machine", "Remembered!", "Clipboard pro",
         "Claude buddy", "Pair programmer", "On a roll", "Week warrior", "Night owl", "Companion", "Hero", "Legend" };
     static readonly string[] AchHow = { "close a doomscroll tab", "close 25 of them", "finish a focus session", "finish 25 focus sessions",
@@ -264,9 +276,11 @@ YouTube         | 240 | youtube.com/watch, - youtube
         RulesPath = Path.Combine(Dir, "rules.txt");
         ProgressPath = Path.Combine(Dir, "progress.txt");
         RemPath = Path.Combine(Dir, "reminders.txt");
+        MemPath = Path.Combine(Dir, "memories.txt");
         if (!File.Exists(RulesPath)) File.WriteAllText(RulesPath, DefaultRules);
         cfg = Parse(File.ReadAllLines(RulesPath));
         LoadProgress();
+        InitMemories();
 
         U = Math.Max(2, (int)Math.Round(5 * S * cfg.Size));
         W = Math.Max((int)(260 * S), 22 * U);
@@ -310,7 +324,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         var t = new Thread(Watch); t.IsBackground = true; t.Start();
         var at = new Thread(AudioWatch); at.IsBackground = true; at.Start();
         ShowWindow(hwnd, 4);
-        if (bubbleT <= 0) Say("Hi! I'll keep you focused.", 3);
+        if (bubbleT <= 0) Chirp("Hi! I'll keep you focused.", 3);
         joyT = 2;
 
         MSG msg;
@@ -383,6 +397,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 tagCache = (focusPhase == 1 ? "Focus " : "Break ") + (int)left.TotalMinutes + ":" + left.Seconds.ToString("00");
             }
             StretchCheck();
+            if (gcSec % 60 == 0) RollDay();
+            if (gcSec % 600 == 30) DiskCheck();
             string agentTag = AgentTag();
             if (tagCache == null) tagCache = agentTag;
             if (++gcSec % 10 == 0) GC.Collect();   // .NET otherwise lets short-lived garbage pile up for MBs before collecting
@@ -449,7 +465,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 if (Step(walkTarget, 55 * S * Math.Max(0.5, cfg.Size), dt))
                 {
                     if (climbAfterWalk) { climbAfterWalk = false; StartClimb(walkTarget <= (wa.L + wa.R) / 2); }
-                    else SetState(SIT, Rand(2, 6));
+                    else if (pushTarget != IntPtr.Zero && Math.Abs(walkTarget - pushAt) < 1) StartPush();
+                    else { pushTarget = IntPtr.Zero; SetState(SIT, Rand(2, 6)); }
                 }
                 break;
             case CLIMB: Climb(dt); break;
@@ -463,6 +480,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 if (stateT >= stateDur) SetState(SIT, 2);
                 break;
             case AIR: Physics(dt); break;
+            case PUSH: PushTick(dt); break;
             case SWING:
                 {
                     double u = Clamp(stateT / Math.Max(0.01, stateDur), 0, 1);
@@ -506,7 +524,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                     {
                         Say("Closed. Back to work!", 2.4); joyT = 2.4;
                         lock (Sync) cooldownUntil = DateTime.Now.AddSeconds(12);
-                        Award(25); Did(ref closes);
+                        Award(25); Did(ref closes, 0);
                     }
                     else Say(why, 2.4);
                 }
@@ -714,6 +732,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         else if (r < 0.5 && cfg.Sleepy) SetState(SLEEP, Rand(12, 30));
         else if (r < 0.72 && cfg.Wander && JumpOntoWindow()) { }
         else if (r < 0.82 && cfg.Wander && cfg.Climb) GoClimb();
+        else if (r < 0.86 && cfg.Wander && PlanPush()) { }
         else if (r < 0.9 && cfg.Wander) { POINT c; GetCursorPos(out c); Walk(c.X); }   // come see what you're doing
         else if (r < 0.96) Hop(0, -520 * S);
         else SetState(SIT, Rand(2, 5));
@@ -774,7 +793,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         }
         else if (st == "done")
         {
-            Did(ref claudeDone);
+            Did(ref claudeDone, 5);
             if (hidden) Tray(1, "Claude Code", "Claude finished" + proj + ".");
             if (!free) return;
             Say("Claude finished" + proj + "!", 4); Hearts(4);
@@ -849,14 +868,17 @@ YouTube         | 240 | youtube.com/watch, - youtube
         else if (level >= 5) { if (!phones) { Px(6.7, dy - 1.2, 0.6, 1.2, GREEN); Px(7.3, dy - 1.9, 1.4, 0.8, GREEN); Px(5.4, dy - 1.6, 1.3, 0.6, GREEN); } }
     }
 
-    static void Did(ref int counter)
+    static void Did(ref int counter, int day)
     {
         counter++;
-        DateTime today = DateTime.Today;
-        if (lastDay != today)
+        RollDay();
+        today[day]++;
+        if (DateTime.Now.Hour < 4) today[6] = 1;
+        DateTime d = DateTime.Today;
+        if (lastDay != d)
         {
-            streak = lastDay == today.AddDays(-1) ? streak + 1 : 1; lastDay = today;
-            if (streak > bestStreak) bestStreak = streak;
+            streak = lastDay == d.AddDays(-1) ? streak + 1 : 1; lastDay = d;
+            if (streak > bestStreak) { bestStreak = streak; if (streak >= 3) Remember("New best streak: " + streak + " days in a row"); }
         }
         if (DateTime.Now.Hour < 4) nightOwl = true;
         CheckAch();
@@ -883,6 +905,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         {
             if ((ach & (1 << i)) != 0 || !AchMet(i)) continue;
             ach |= 1 << i;
+            Remember("Unlocked \"" + AchNames[i] + "\": " + AchHow[i]);
             Say("Achievement: " + AchNames[i] + "!", 4); joyT = 2.5; Hearts(5); MessageBeep(0x40);
             SaveProgress();
             return;                                                              // one at a time; the next shows on the next event
@@ -898,6 +921,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         AppendMenu(m, GRAY, UIntPtr.Zero, "Focus sessions: " + focusDone + "     Reminders done: " + remDone);
         AppendMenu(m, GRAY, UIntPtr.Zero, "Clipboard actions: " + clipActs + "     Claude tasks: " + claudeDone);
         AppendMenu(m, GRAY, UIntPtr.Zero, "Streak: " + cur + (cur == 1 ? " day" : " days") + "   (best " + bestStreak + ")");
+        AppendMenu(m, GRAY, UIntPtr.Zero, "Personality: " + Traits() + "     Together for " + ((DateTime.Today - met).Days + 1) + " days");
         AppendMenu(m, SEP, UIntPtr.Zero, null);
         AppendMenu(m, GRAY, UIntPtr.Zero, "Achievements " + got + " / " + AchNames.Length);
         for (int i = 0; i < AchNames.Length; i++)
@@ -910,7 +934,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
         {
             File.WriteAllText(ProgressPath, "level=" + level + "\r\nxp=" + xp + "\r\ncloses=" + closes + "\r\npats=" + pats + "\r\nfocus=" + focusDone
                 + "\r\nreminders=" + remDone + "\r\nclipboard=" + clipActs + "\r\nclaude=" + claudeDone + "\r\nstreak=" + streak + "\r\nbest=" + bestStreak
-                + "\r\nlastday=" + (lastDay == DateTime.MinValue ? "" : lastDay.ToString("yyyy-MM-dd", Inv)) + "\r\nowl=" + (nightOwl ? 1 : 0) + "\r\nach=" + ach + "\r\n");
+                + "\r\nlastday=" + (lastDay == DateTime.MinValue ? "" : lastDay.ToString("yyyy-MM-dd", Inv)) + "\r\nowl=" + (nightOwl ? 1 : 0) + "\r\nach=" + ach
+                + "\r\nmet=" + (met == DateTime.MinValue ? "" : met.ToString("yyyy-MM-dd", Inv))
+                + "\r\nday=" + (todayDate == DateTime.MinValue ? "" : EncodeDay(todayDate, today)) + "\r\nhist=" + string.Join(";", hist.ToArray()) + "\r\n");
         }
         catch { }
     }
@@ -933,10 +959,329 @@ YouTube         | 240 | youtube.com/watch, - youtube
                     case "reminders": remDone = n; break; case "clipboard": clipActs = n; break; case "claude": claudeDone = n; break;
                     case "streak": streak = n; break; case "best": bestStreak = n; break; case "owl": nightOwl = n == 1; break; case "ach": ach = n; break;
                     case "lastday": DateTime d; if (DateTime.TryParseExact(v, "yyyy-MM-dd", Inv, DateTimeStyles.None, out d)) lastDay = d; break;
+                    case "met": DateTime m; if (DateTime.TryParseExact(v, "yyyy-MM-dd", Inv, DateTimeStyles.None, out m)) met = m; break;
+                    case "day": DateTime dd; int[] t; if (DecodeDay(v, out dd, out t)) { todayDate = dd; today = t; } break;
+                    case "hist": foreach (var e in v.Split(';')) { DateTime hd; int[] ht; if (DecodeDay(e, out hd, out ht)) hist.Add(e); } break;
                 }
             }
         }
         catch { }
+    }
+
+    // ------------------------------------------------------------------ quiet mode
+    static void Chirp(string text, double seconds) { if (!cfg.Quiet) Say(text, seconds); }   // optional chit-chat; `quiet = yes` drops it
+
+    // ------------------------------------------------------------------ memories and habits ("grows from your days")
+    static void Remember(string text)
+    {
+        string line = DateTime.Now.ToString("yyyy-MM-dd HH:mm", Inv) + " | " + text.Replace('\r', ' ').Replace('\n', ' ');
+        memTail.Add(line);
+        if (memTail.Count > 12) memTail.RemoveAt(0);
+        try
+        {
+            if (!File.Exists(MemPath)) File.WriteAllText(MemPath, "# PixelPet Focus memory book: one memory per line, newest at the bottom.\r\n");
+            File.AppendAllText(MemPath, line + "\r\n");
+        }
+        catch { }
+    }
+
+    static void InitMemories()
+    {
+        try
+        {
+            if (File.Exists(MemPath))
+            {
+                string[] all = File.ReadAllLines(MemPath);
+                if (all.Length > 600) { var keep = new string[500]; Array.Copy(all, all.Length - 500, keep, 0, 500); File.WriteAllLines(MemPath, keep); all = keep; }
+                for (int i = Math.Max(0, all.Length - 12); i < all.Length; i++) if (!all[i].StartsWith("#") && all[i].Trim().Length > 0) memTail.Add(all[i]);
+            }
+        }
+        catch { }
+        if (met == DateTime.MinValue) { met = DateTime.Today; Remember("We met. Hi, I'm your new pet!"); }
+        RollDay();
+        ComputeTraits(false); traitsReady = true;
+        SaveProgress();
+    }
+
+    // At the first activity of a new day (or once a minute), yesterday becomes a memory.
+    static void RollDay()
+    {
+        DateTime d = DateTime.Today;
+        if (todayDate == d) return;
+        if (todayDate != DateTime.MinValue)
+        {
+            string sum = DaySummary(todayDate, today);
+            if (sum != null) { hist.Add(EncodeDay(todayDate, today)); Remember(sum); }
+            while (hist.Count > 13) hist.RemoveAt(0);
+        }
+        today = new int[7]; todayDate = d;
+        if (traitsReady) { ComputeTraits(true); SaveProgress(); }
+    }
+
+    static string EncodeDay(DateTime d, int[] t)
+    {
+        var sb = new StringBuilder(d.ToString("yyyyMMdd", Inv)).Append(':');
+        for (int i = 0; i < t.Length; i++) { if (i > 0) sb.Append(','); sb.Append(t[i].ToString(Inv)); }
+        return sb.ToString();
+    }
+
+    static bool DecodeDay(string e, out DateTime d, out int[] t)
+    {
+        t = new int[7]; d = DateTime.MinValue;
+        int colon = e.IndexOf(':');
+        if (colon != 8 || !DateTime.TryParseExact(e.Substring(0, 8), "yyyyMMdd", Inv, DateTimeStyles.None, out d)) return false;
+        var f = e.Substring(9).Split(',');
+        for (int i = 0; i < f.Length && i < 7; i++) int.TryParse(f[i], NumberStyles.Integer, Inv, out t[i]);
+        return true;
+    }
+
+    static string DaySummary(DateTime d, int[] t)
+    {
+        var bits = new List<string>();
+        if (t[0] > 0) bits.Add("closed " + t[0] + (t[0] == 1 ? " doomscroll tab" : " doomscroll tabs"));
+        if (t[2] > 0) bits.Add(t[2] + (t[2] == 1 ? " focus session" : " focus sessions"));
+        if (t[3] > 0) bits.Add(t[3] + (t[3] == 1 ? " reminder done" : " reminders done"));
+        if (t[5] > 0) bits.Add("Claude finished " + t[5] + (t[5] == 1 ? " task" : " tasks"));
+        if (t[1] > 0) bits.Add(t[1] + (t[1] == 1 ? " pat" : " pats"));
+        if (t[4] > 0) bits.Add(t[4] + (t[4] == 1 ? " clipboard help" : " clipboard helps"));
+        if (bits.Count == 0) return null;
+        return d.ToString("MMM d", Inv) + ": " + string.Join(", ", bits.ToArray()) + "." + (t[6] > 0 ? " Stayed up late." : "");
+    }
+
+    // Personality from the last 7 days. New traits become memories, and two of them show on the pet.
+    static void ComputeTraits(bool announce)
+    {
+        int f = today[2], p = today[1], c = today[0], k = today[5], late = today[6];
+        foreach (var e in hist)
+        {
+            DateTime d; int[] t;
+            if (!DecodeDay(e, out d, out t) || (DateTime.Today - d).TotalDays > 6) continue;
+            f += t[2]; p += t[1]; c += t[0]; k += t[5]; late += t[6];
+        }
+        Trait(ref traitFocused, f >= 5, "Focused", "lots of focus sessions this week (look, glasses)", announce);
+        Trait(ref traitLoved, p >= 40, "Loved", "so many pats this week (rosy cheeks!)", announce);
+        Trait(ref traitOwl, late >= 3, "a Night owl", "we stayed up late a lot this week", announce);
+        Trait(ref traitGuard, c >= 10, "a Guardian", "closed 10+ doomscroll tabs this week", announce);
+        Trait(ref traitBuddy, k >= 20, "Claude's buddy", "Claude finished 20+ tasks this week", announce);
+    }
+
+    static void Trait(ref bool field, bool now, string name, string why, bool announce)
+    {
+        if (now && !field && announce) { Remember("Became " + name + ": " + why); Chirp("I think I'm becoming " + name + ".", 3); }
+        field = now;
+    }
+
+    static string Traits()
+    {
+        var t = new List<string>();
+        if (traitFocused) t.Add("Focused"); if (traitLoved) t.Add("Loved"); if (traitOwl) t.Add("Night owl");
+        if (traitGuard) t.Add("Guardian"); if (traitBuddy) t.Add("Claude's buddy");
+        return t.Count == 0 ? "still getting to know you" : string.Join(", ", t.ToArray());
+    }
+
+    static void DrawTraits(int dy)
+    {
+        if (traitLoved) { Px(2.2, dy + 4.6, 1.3, 0.6, PINK); Px(10.5, dy + 4.6, 1.3, 0.6, PINK); }   // rosy cheeks, just under the glasses
+        if (traitFocused)                                                        // study glasses
+        {
+            Px(3, dy + 1.4, 3, 0.35, DARK); Px(3, dy + 4.1, 3, 0.35, DARK); Px(3, dy + 1.4, 0.35, 3, DARK); Px(5.65, dy + 1.4, 0.35, 3, DARK);
+            Px(8, dy + 1.4, 3, 0.35, DARK); Px(8, dy + 4.1, 3, 0.35, DARK); Px(8, dy + 1.4, 0.35, 3, DARK); Px(10.65, dy + 1.4, 0.35, 3, DARK);
+            Px(6, dy + 2.2, 2, 0.35, DARK);
+        }
+    }
+
+    static void AddMemoryItems(IntPtr m)
+    {
+        int shown = 0;
+        for (int i = memTail.Count - 1; i >= 0 && shown < 10; i--, shown++)
+        {
+            string line = memTail[i]; DateTime when; int bar = line.IndexOf(" | ");
+            string label = bar == 16 && DateTime.TryParseExact(line.Substring(0, 16), "yyyy-MM-dd HH:mm", Inv, DateTimeStyles.None, out when)
+                ? when.ToString("MMM d", Inv) + "  -  " + line.Substring(19) : line;
+            AppendMenu(m, GRAY, UIntPtr.Zero, Menuish(label.Length > 90 ? label.Substring(0, 90) + "..." : label));
+        }
+        if (shown == 0) AppendMenu(m, GRAY, UIntPtr.Zero, "No memories yet");
+        AppendMenu(m, SEP, UIntPtr.Zero, null);
+        AppendMenu(m, 0, (UIntPtr)66, "Open memory book...");
+    }
+
+    // ------------------------------------------------------------------ tools and a quick system check
+    static string BatteryText()
+    {
+        SYSTEM_POWER_STATUS ps;
+        if (!GetSystemPowerStatus(out ps) || (ps.BatteryFlag & 128) != 0 || ps.BatteryLifePercent > 100) return "No battery";
+        return "Battery " + ps.BatteryLifePercent + "%" + (ps.ACLineStatus == 1 ? " (charging)" : "");
+    }
+
+    static bool DiskInfo(out double freeGb, out double totalGb)
+    {
+        ulong avail, total, free; freeGb = totalGb = 0;
+        if (!GetDiskFreeSpaceEx("C:\\", out avail, out total, out free)) return false;
+        freeGb = avail / 1073741824.0; totalGb = total / 1073741824.0;
+        return totalGb > 0;
+    }
+
+    static int RamLoad() { var ms = new MEMORYSTATUSEX(); ms.dwLength = 64; return GlobalMemoryStatusEx(ref ms) ? (int)ms.dwMemoryLoad : -1; }
+
+    static string UptimeText() { var t = TimeSpan.FromMilliseconds(GetTickCount64()); return "Up for " + (t.Days > 0 ? t.Days + "d " : "") + t.Hours + "h " + t.Minutes + "m"; }
+
+    static void AddToolItems(IntPtr m)
+    {
+        double free, total; int ram = RamLoad();
+        AppendMenu(m, GRAY, UIntPtr.Zero, BatteryText());
+        AppendMenu(m, GRAY, UIntPtr.Zero, DiskInfo(out free, out total) ? "Disk C: " + free.ToString("0", Inv) + " GB free of " + total.ToString("0", Inv) + " GB" : "Disk C: unknown");
+        if (ram >= 0) AppendMenu(m, GRAY, UIntPtr.Zero, "Memory in use: " + ram + "%");
+        AppendMenu(m, GRAY, UIntPtr.Zero, UptimeText());
+        AppendMenu(m, SEP, UIntPtr.Zero, null);
+        AppendMenu(m, 0, (UIntPtr)60, "System check");
+        AppendMenu(m, 0, (UIntPtr)61, "Screenshot (snip)");
+        AppendMenu(m, 0, (UIntPtr)62, "Task Manager");
+        AppendMenu(m, 0, (UIntPtr)63, "Calculator");
+        AppendMenu(m, 0, (UIntPtr)64, "Notepad");
+        AppendMenu(m, 0, (UIntPtr)65, "Lock PC");
+    }
+
+    static void SystemCheck()
+    {
+        double free, total; int ram = RamLoad(); var worries = new List<string>();
+        bool disk = DiskInfo(out free, out total);
+        if (disk && (free < 5 || free / total < 0.08)) worries.Add("disk C: is nearly full");
+        if (ram >= 90) worries.Add("memory is almost used up");
+        if (GetTickCount64() > 7UL * 24 * 3600 * 1000) worries.Add("a restart soon would help");
+        SYSTEM_POWER_STATUS ps;
+        if (GetSystemPowerStatus(out ps) && (ps.BatteryFlag & 128) == 0 && ps.BatteryLifePercent <= 20 && ps.ACLineStatus != 1) worries.Add("battery is low");
+        string report = BatteryText() + "\n" + (disk ? "C: " + free.ToString("0", Inv) + " GB free" : "C: ?") + (ram >= 0 ? " \u00B7 RAM " + ram + "%" : "") + "\n" + UptimeText();
+        Say(report + "\n" + (worries.Count == 0 ? "All good!" : "Hmm: " + string.Join(", ", worries.ToArray()) + "."), 7);
+        if (worries.Count == 0) { joyT = 1.5; Hearts(2); } else angryT = 1;
+    }
+
+    static void DiskCheck()
+    {
+        double free, total;
+        if (diskWarned == DateTime.Today || !DiskInfo(out free, out total) || (free >= 5 && free / total >= 0.08)) return;
+        diskWarned = DateTime.Today;
+        Say("Disk C: is almost full: " + free.ToString("0.0", Inv) + " GB left.", 5); angryT = 1;
+        Remember("Warned you: disk C: had only " + free.ToString("0.0", Inv) + " GB left");
+    }
+
+    // ------------------------------------------------------------------ windows as furniture
+    // Windows the pet may shove: normal, visible, not maximised/fullscreen, not topmost/tool/click-through, not ours.
+    static bool Pushable(IntPtr h, out RECT r)
+    {
+        r = new RECT();
+        if (h == IntPtr.Zero || !IsWindowVisible(h) || IsIconic(h) || IsZoomed(h) || Cloaked(h) || !Frame(h, out r)) return false;
+        uint pid; GetWindowThreadProcessId(h, out pid);
+        if (pid == GetCurrentProcessId()) return false;
+        int ex = GetWindowLong(h, -20);
+        if ((ex & 0x8) != 0 || (ex & 0x80) != 0 || (ex & 0x20) != 0) return false;   // topmost, tool window, click-through
+        if (r.R - r.L >= wa.R - wa.L - 4 && r.B - r.T >= wa.B - wa.T - 4) return false;
+        clsBuf.Length = 0; GetClassName(h, clsBuf, 64);
+        string cls = clsBuf.ToString();
+        return cls != "Shell_TrayWnd" && cls != "Shell_SecondaryTrayWnd" && cls != "Progman" && cls != "WorkerW";
+    }
+
+    static bool Cloaked(IntPtr h) { int c; return DwmGetWindowAttribute(h, 14, out c, 4) == 0 && c != 0; }   // hidden UWP / other desktops
+
+    static bool CollectCb(IntPtr h, IntPtr l) { enumList.Add(h); return true; }
+
+    // The top-most real window at a point (our own layered windows don't count).
+    static IntPtr TopWindowAt(int px, int py)
+    {
+        enumList.Clear(); EnumWindows(collectCb, IntPtr.Zero);
+        uint me = GetCurrentProcessId();
+        foreach (var h in enumList)
+        {
+            if (!IsWindowVisible(h) || IsIconic(h) || Cloaked(h) || (GetWindowLong(h, -20) & 0x20) != 0) continue;
+            uint pid; GetWindowThreadProcessId(h, out pid);
+            if (pid == me) continue;
+            RECT r;
+            if (Frame(h, out r) && px >= r.L && px < r.R && py >= r.T && py < r.B) return h;
+        }
+        return IntPtr.Zero;
+    }
+
+    // Always async (a hung app can't freeze the pet), and always leaves a grabbable strip on screen.
+    static bool MoveWindowBy(IntPtr h, int dx)
+    {
+        RECT wr;
+        if (dx == 0 || !GetWindowRect(h, out wr)) return false;
+        int w = wr.R - wr.L, nl = Clamp(wr.L + dx, wa.L - w + (int)(120 * S), wa.R - (int)(120 * S));
+        if (nl == wr.L) return false;
+        SetWindowPos(h, IntPtr.Zero, nl, wr.T, 0, 0, 0x4215);                   // NOSIZE|NOZORDER|NOACTIVATE|NOOWNERZORDER|ASYNCWINDOWPOS
+        return true;
+    }
+
+    // Thrown sideways into a window: it gets knocked over and the pet bounces off.
+    static void BumpWindow(double dt)
+    {
+        int dir = vx > 0 ? 1 : -1;
+        double lead = x + dir * 7 * U, prevLead = lead - vx * dt;
+        IntPtr h = TopWindowAt((int)lead, (int)(y - 4 * U)); RECT r;
+        if (!Pushable(h, out r)) return;
+        double edge = dir > 0 ? r.L : r.R;
+        if (dir > 0 ? (prevLead > edge + 1 || lead < edge) : (prevLead < edge - 1 || lead > edge)) return;   // not its side we just crossed
+        MoveWindowBy(h, (int)Clamp(vx * 0.06, -120 * S, 120 * S));
+        x = edge - dir * 7 * U; vx = -vx * 0.35; sqK = 0.6; sqT = 0.2;
+        parts.Add(new Part { X = edge, Y = y - 7 * U, VY = -30 * S, Life = 0.8, Text = "bonk!" });
+    }
+
+    // Now and then: walk up to a window resting on the taskbar and shove it a little way along.
+    static bool PlanPush()
+    {
+        DateTime now = DateTime.Now;
+        if (!cfg.Push || perch != IntPtr.Zero || orient != 0 || focusPhase == 1 || doing == "work" || doing == "study" || now - lastPush < TimeSpan.FromMinutes(10)) return false;
+        IntPtr fg = GetForegroundWindow(), best = IntPtr.Zero; RECT br = new RECT(); double bestD = double.MaxValue, bestAt = 0; int bestDir = 0;
+        enumList.Clear(); EnumWindows(collectCb, IntPtr.Zero);
+        var cands = enumList.ToArray();
+        foreach (var h in cands)
+        {
+            RECT r;
+            if (h == fg || !Pushable(h, out r) || r.B < wa.B - 8 * U || r.B > wa.B + 4 || r.R - r.L < 200 * S) continue;
+            bool fromLeft = Math.Abs(x - r.L) <= Math.Abs(x - r.R);
+            for (int pass = 0; pass < 2; pass++, fromLeft = !fromLeft)
+            {
+                double at = fromLeft ? r.L - 7 * U : r.R + 7 * U; int dir = fromLeft ? 1 : -1;
+                double room = dir > 0 ? wa.R - r.R : r.L - wa.L;
+                if (at < MinX() || at > MaxX() || room < 60 * S) continue;
+                if (TopWindowAt(fromLeft ? r.L + 3 : r.R - 4, (int)(r.B - 3 * U)) != h) continue;   // that corner is under another window
+                double dist = Math.Abs(at - x);
+                if (dist < bestD) { bestD = dist; best = h; br = r; bestAt = at; bestDir = dir; }
+                break;
+            }
+        }
+        if (best == IntPtr.Zero) return false;
+        pushTarget = best; pushRect = br; pushDir = bestDir;
+        Walk(bestAt); pushAt = walkTarget;
+        return true;
+    }
+
+    static void StartPush()
+    {
+        RECT r; IntPtr h = pushTarget;
+        if (!Pushable(h, out r) || h == GetForegroundWindow() || r.L != pushRect.L || r.B != pushRect.B) { pushTarget = IntPtr.Zero; SetState(SIT, 2); return; }
+        facing = pushDir; pushLeft = Rand(40, 90) * S; pushAcc = 0; pushed = 0; lastPush = DateTime.Now;
+        SetState(PUSH, 0);
+        Chirp("Hnngh!", 1);
+    }
+
+    static void PushTick(double dt)
+    {
+        if (stateT < 0.5) return;                                               // brace first
+        RECT r;
+        if (pushLeft <= 0 || !Pushable(pushTarget, out r) || pushTarget == GetForegroundWindow()) { EndPush(); return; }
+        pushAcc += 30 * S * dt;
+        int move = (int)pushAcc;
+        if (move == 0) return;
+        pushAcc -= move;
+        if (!MoveWindowBy(pushTarget, pushDir * move)) { EndPush(); return; }
+        x += pushDir * move; pushLeft -= move; pushed += move;
+    }
+
+    static void EndPush()
+    {
+        pushTarget = IntPtr.Zero;
+        if (pushed > 0) { Chirp(PushLines[rnd.Next(PushLines.Length)], 2); joyT = 1; }
+        SetState(SIT, Rand(2, 4));
     }
 
     // ------------------------------------------------------------------ stretch nudge (idea from AgentPet's break reminder)
@@ -967,7 +1312,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         string act = TextTools.Activity(proc, title, url);
         if (act == "meeting") return false;                                     // never chirp during a call
         bool changed = act != lastActivity; lastActivity = act;
-        curiousAsk = doing.Length == 0 && (act.Length == 0 || (changed && rnd.NextDouble() < 0.5));
+        curiousAsk = !cfg.Quiet && doing.Length == 0 && (act.Length == 0 || (changed && rnd.NextDouble() < 0.5));
         curiousLine = curiousAsk ? "What are you up to?  (click me)" : TextTools.Comment(act, doing, rnd);
         if (curiousLine == null) return false;
         curiousAt = now;
@@ -990,7 +1335,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
             Say(line, 12); askT = 12;
             parts.Add(new Part { X = x + facing * 3 * U, Y = y - 14 * U, VY = -14 * S, Life = 1.6, Text = "?" });
         }
-        else Say(line, 3.5);
+        else Chirp(line, 3.5);
     }
 
     static void AddDoingItems(IntPtr m)
@@ -1141,6 +1486,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         vy += g * dt; x += vx * dt; y += vy * dt;
         double minX = wa.L + 8 * U, maxX = wa.R - 8 * U;
         if (GrabEdge(minX, maxX)) return;
+        if (cfg.Push && Math.Abs(vx) > 500 * S) BumpWindow(dt);
         if (x < minX) { x = minX; vx = -vx * 0.5; }
         if (x > maxX) { x = maxX; vx = -vx * 0.5; }
         if (y < wa.T + 10 * U) { y = wa.T + 10 * U; if (vy < 0) vy = 0; }
@@ -1163,7 +1509,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
             // a cute, deliberate landing rather than the usual fall: a solid squash, a happy line, a
             // scatter of dust and a couple of hearts, then a short cooldown before another swing.
             sqK = 0.85; sqT = 0.25; vx = 0; vy = 0; webCool = 1.0; joyT = 1.2;
-            Say(LandingLines[rnd.Next(LandingLines.Length)], 1.8);
+            Chirp(LandingLines[rnd.Next(LandingLines.Length)], 1.8);
             Hearts(2);
             for (int i = 0; i < 5; i++)
                 parts.Add(new Part { X = x + Rand(-9, 9) * U, Y = y - Rand(0, 1.5) * U, VY = -Rand(18, 40) * S, Life = Rand(0.5, 0.9), Text = "\u00B7" });
@@ -1225,6 +1571,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     {
         held = true; perch = IntPtr.Zero; ignorePerch = IntPtr.Zero; vx = vy = 0;
         orient = 0; climbNext = 0; hangSleep = false; climbAfterWalk = false;   // picked off the wall: upright again
+        pushTarget = IntPtr.Zero;
         curiousLine = null;
         if (alert != null) { alert = null; bubbleT = 0; }
         SetState(HELD, 0);
@@ -1260,7 +1607,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (hangSleep) { hangSleep = false; angryT = 1.5; Say("Hmph. Bat nap ruined.", 2); SetState(HANG, 2); return; }
         joyT = 1.6; Hearts(3);
         if (state != AIR && state != TYPE && orient == 0) Hop(0, -420 * S);
-        if ((DateTime.Now - lastPat).TotalSeconds >= 4) { lastPat = DateTime.Now; Award(5); Did(ref pats); }
+        if ((DateTime.Now - lastPat).TotalSeconds >= 4) { lastPat = DateTime.Now; Award(5); Did(ref pats, 1); }
     }
 
     static void Hearts(int n)
@@ -1280,6 +1627,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
             string was = Rank(level - gained);
             Say(Rank(level) != was ? "Level " + level + "! Evolved into a " + Rank(level) + "!" : "Level " + level + "!", 3.5);
             joyT = 3; Hearts(6);
+            Remember("Grew to level " + level + (Rank(level) != was ? " and became a " + Rank(level) : ""));
             CheckAch();
         }
     }
@@ -1335,7 +1683,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (focusPhase == 0 || DateTime.Now < focusEnd) return;
         if (focusPhase == 1)
         {
-            focusPhase = 2; focusEnd = DateTime.Now.AddMinutes(cfg.Break); Did(ref focusDone);
+            focusPhase = 2; focusEnd = DateTime.Now.AddMinutes(cfg.Break); Did(ref focusDone, 2);
             Say("Break time! Stretch a bit.", 6);
         }
         else { focusPhase = 0; Say("Break's over. Ready?", 6); }
@@ -1401,6 +1749,12 @@ YouTube         | 240 | youtube.com/watch, - youtube
         IntPtr cm = CreatePopupMenu();
         AddClaudeItems(cm);
         AppendMenu(m, POPUP, Sub(cm), "Claude Code");
+        IntPtr tm = CreatePopupMenu();
+        AddToolItems(tm);
+        AppendMenu(m, POPUP, Sub(tm), "Tools");
+        IntPtr mm = CreatePopupMenu();
+        AddMemoryItems(mm);
+        AppendMenu(m, POPUP, Sub(mm), "Memories");
         AppendMenu(m, SEP, UIntPtr.Zero, null);
         AppendMenu(m, 0, (UIntPtr)20, "Settings...");
         AppendMenu(m, auto ? CHECK : 0, (UIntPtr)21, "Start with Windows");
@@ -1408,7 +1762,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         AppendMenu(m, SEP, UIntPtr.Zero, null);
         AppendMenu(m, 0, (UIntPtr)23, "Quit");
         IntPtr prev; int cmd = Popup(m, out prev);
-        if (cmd != 20 && cmd != 24) Restore(prev);                              // Notepad takes focus itself
+        if (cmd != 20 && cmd != 24 && (cmd < 61 || cmd > 66)) Restore(prev);   // launched apps and Notepad take focus themselves
         if (DoClip(cmd)) return;
         DateTime now = DateTime.Now;
         switch (cmd)
@@ -1435,6 +1789,13 @@ YouTube         | 240 | youtube.com/watch, - youtube
             case 23: DestroyWindow(hwnd); break;
             case 24: LoadReminders(); ShellExecute(IntPtr.Zero, "open", "notepad.exe", "\"" + RemPath + "\"", null, 1); break;
             case 25: pauseRecurring = !pauseRecurring; Say(pauseRecurring ? "Recurring reminders paused." : "Recurring reminders on.", 2); break;
+            case 60: SystemCheck(); break;
+            case 61: ShellExecute(IntPtr.Zero, "open", "ms-screenclip:", null, null, 1); break;
+            case 62: ShellExecute(IntPtr.Zero, "open", "taskmgr.exe", null, null, 1); break;
+            case 63: ShellExecute(IntPtr.Zero, "open", "calc.exe", null, null, 1); break;
+            case 64: ShellExecute(IntPtr.Zero, "open", "notepad.exe", null, null, 1); break;
+            case 65: LockWorkStation(); break;
+            case 66: ShellExecute(IntPtr.Zero, "open", "notepad.exe", "\"" + MemPath + "\"", null, 1); break;
             case 50: case 51:
                 ShellExecute(IntPtr.Zero, "open", System.Reflection.Assembly.GetEntryAssembly().Location, cmd == 50 ? "--connect-claude" : "--disconnect-claude", null, 1);
                 break;
@@ -1502,7 +1863,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (!useful) return;
         clipOfferT = 8;                                                         // click within 8 s for options; otherwise nothing happens
         parts.Add(new Part { X = x + facing * 3 * U, Y = y - 14 * U, VY = -14 * S, Life = 1.6, Text = "!" });
-        if (!hintShown) { hintShown = true; Say("Click me for options", 2.5); }
+        if (!hintShown) { hintShown = true; Chirp("Click me for options", 2.5); }
     }
 
     static void ClipMenu()
@@ -1573,7 +1934,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
             case 114: if (SetClip(clipText.ToLowerInvariant())) Say("done.", 1.5); break;
             case 115: if (SetClip(Inv.TextInfo.ToTitleCase(clipText.ToLowerInvariant()))) Say("Done.", 1.5); break;
         }
-        joyT = 1; Did(ref clipActs);
+        joyT = 1; Did(ref clipActs, 4);
         return true;
     }
 
@@ -1740,7 +2101,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         else FindLive(r).Next = r.Kind == "every" ? now.AddMinutes(r.Every) : NextDaily(r, now);
         joyT = 1.5; Hearts(3); Say("Nice.", 1.5);
         if (signT <= 120) Award(5);
-        Did(ref remDone);
+        Did(ref remDone, 3);
     }
 
     static void ReminderSnooze(DateTime until)
@@ -2109,7 +2470,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
 
         if (dy == 0)
         {
-            bool walking = state == WALK || state == RUN || state == CLIMB || state == SWING;
+            bool walking = state == WALK || state == RUN || state == CLIMB || state == SWING || state == PUSH;
             int phase = walking ? (int)(animT * (state == RUN ? 14 : 8)) % 2 : -1;
             for (int i = 0; i < 4; i++) Px(Legs[i], 7, 1, state == HELD ? 3 : (i % 2 == phase ? 1 : 2), body);
         }
@@ -2117,8 +2478,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
 
         bool up = joy || state == HELD || (sign != null && state != TYPE);   // holding up the reminder sign
         bool swipeRaised = state == SWIPE && stateT < 0.25, swipeStrike = state == SWIPE && stateT >= 0.25;
-        bool roping = ropeT >= 0; bool swinging = state == SWING;
-        bool leftBusy = facing < 0 && (swipeRaised || swipeStrike || roping || swinging), rightBusy = facing > 0 && (swipeRaised || swipeStrike || roping || swinging);
+        bool roping = ropeT >= 0; bool swinging = state == SWING; bool pushing = state == PUSH;
+        bool leftBusy = pushing || (facing < 0 && (swipeRaised || swipeStrike || roping || swinging)), rightBusy = pushing || (facing > 0 && (swipeRaised || swipeStrike || roping || swinging));
         if (typing && lapOpen > 0)
         {
             double off = (1 - lapOpen) * 3.5;                                   // laptop rises out of the ground
@@ -2147,6 +2508,12 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (swipeRaised) Px(facing > 0 ? 12 : 0, 0, 2, 3, body);
         if (roping) Px(facing > 0 ? 12 : 0, dy, 2, 3, body);
         if (swinging) Px(facing > 0 ? 12 : 0, dy, 2, 3, body);
+        if (pushing)                                                             // both paws on the window, shoving
+        {
+            double shove = (int)(animT * 4) % 2 == 0 ? 0 : 0.3;
+            Px(facing > 0 ? 11.5 + shove : -0.5 - shove, 3.4 + dy, 3, 1.4, body);
+            Px(facing > 0 ? 11 + shove : 0 - shove, 5.1 + dy, 3, 1.4, body);
+        }
         if (swipeStrike) Px(facing > 0 ? 12 : -2, 3, 4, 2, body);
 
         if (sleeping || (blinkOn > 0 && !angry && !joy)) { Px(3.8, 3 + dy, 1.4, 0.5, EYE); Px(8.8, 3 + dy, 1.4, 0.5, EYE); }
@@ -2155,6 +2522,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         else { Px(4 + lookX, 2 + lookY + dy, 1, 2, EYE); Px(9 + lookX, 2 + lookY + dy, 1, 2, EYE); }
 
         DrawRank(dy, wasPhones);
+        DrawTraits(dy);
         if (wasPhones)
         {
             Px(2.4, dy - 1.2, 9.2, 0.7, DARK);                                      // band over the head
@@ -2293,6 +2661,11 @@ YouTube         | 240 | youtube.com/watch, - youtube
         ok(TextTools.Pretty("{\"a\":[1,{\"b\":\"x,y\"}],\"c\":{}}") == "{\n  \"a\": [\n    1,\n    {\n      \"b\": \"x,y\"\n    }\n  ],\n  \"c\": {}\n}");
         ok(Rank(1) == "Hatchling" && Rank(5) == "Companion" && Rank(19) == "Scout" && Rank(35) == "Legend" && NextRank(35) == 0);
         ok(AchNames.Length == AchHow.Length && AchNames.Length <= 31);
+        DateTime dd0; int[] tt0;
+        ok(DecodeDay(EncodeDay(new DateTime(2026, 9, 18), new[] { 3, 5, 2, 1, 0, 4, 1 }), out dd0, out tt0) && dd0 == new DateTime(2026, 9, 18) && tt0[0] == 3 && tt0[5] == 4 && tt0[6] == 1);
+        ok(!DecodeDay("junk", out dd0, out tt0));
+        ok(DaySummary(new DateTime(2026, 9, 18), new[] { 3, 0, 2, 0, 0, 1, 1 }) == "Sep 18: closed 3 doomscroll tabs, 2 focus sessions, Claude finished 1 task. Stayed up late.");
+        ok(DaySummary(new DateTime(2026, 9, 18), new int[7]) == null);
 
         double px, py;
         SwingPos(0, 100, 50, 0, 200, 100, 0, out px, out py);
@@ -2411,6 +2784,14 @@ YouTube         | 240 | youtube.com/watch, - youtube
     [DllImport("gdi32.dll")] static extern int SetTextColor(IntPtr dc, int color);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] static extern bool TextOut(IntPtr dc, int x, int y, string s, int n);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int v, int size);
+    [StructLayout(LayoutKind.Sequential)] struct MEMORYSTATUSEX { public uint dwLength, dwMemoryLoad; public ulong ullTotalPhys, ullAvailPhys, ullTotalPageFile, ullAvailPageFile, ullTotalVirtual, ullAvailVirtual, ullAvailExtendedVirtual; }
+    [DllImport("kernel32.dll")] static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX ms);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool GetDiskFreeSpaceEx(string dir, out ulong avail, out ulong total, out ulong free);
+    [DllImport("kernel32.dll")] static extern ulong GetTickCount64();
+    [DllImport("kernel32.dll")] static extern uint GetCurrentProcessId();
+    [DllImport("user32.dll")] static extern bool LockWorkStation();
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr GetModuleHandle(string name);
     [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool QueryFullProcessImageName(IntPtr h, int flags, StringBuilder sb, ref int size);

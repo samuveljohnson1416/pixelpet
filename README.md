@@ -17,12 +17,17 @@ PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no de
 - It walks along the taskbar, jumps onto the title bar of the window you're using and rides along when you move that window. It falls off when the window is minimised, maximised, closed or covered.
 - You can drag it and throw it. It falls with gravity, bounces off the screen edges and can land on windows.
 - It climbs the screen edges and walks upside-down along the top.
+- **Windows are furniture:** throw it sideways into a window and it knocks the window aside with a "bonk!". Every so often (at most once every 10 minutes) it also walks up to a window resting on the taskbar and shoves it along a little. It never pushes the window you're using, maximized or fullscreen windows, or anything while you're focusing. `push = no` turns this off.
 - **Web-swing:** press **Ctrl+Alt+G** (or pick **Web-swing here** in the menu) and it shoots a web to your mouse pointer, swings over on an arc, and lands with a little squash, a puff of dust and hearts.
 - It takes naps and follows your cursor with its eyes.
 - **Curious visits:** every few minutes it hops onto (or walks under) the window you're using and reacts to what it is: code editors, terminals, GitHub, docs, mail, chat, video, music, games, shopping and more. Sometimes it asks "What are you up to?". Click it to answer from a quick menu (Working, Studying, Taking a break, Just browsing, Leave me alone). If you say you're working it gets quieter, and it nudges you if you drift to video or social media. It stays silent during meetings and focus sessions. It only uses the app name, window title and URL it already reads; nothing is captured or sent anywhere (`curious = no` turns it off).
 - Clicking it counts as a pat and gives XP; closing a doomscroll tab, finishing reminders and Claude Code finishing a task give XP too. Your level is saved.
 - **It evolves as it levels up:** Hatchling, then Companion at level 5 (a sprout), Scout at 10 (an explorer cap), Hero at 20 (a headband) and Legend at 35 (a crown). Hats step aside when it's wearing headphones.
 - **14 achievements and a stats card.** **Stats & achievements** in the menu shows tabs closed, pats, focus sessions, reminders done, clipboard actions, Claude tasks and your daily streak, plus which achievements you've unlocked.
+- **Memories and habits:** it keeps a memory book of the moments you shared: the day you met, level-ups, achievements, best streaks, and a quiet one-line summary of each day ("Sep 18: closed 3 doomscroll tabs, 2 focus sessions..."). **Memories** in the menu shows the latest; **Open memory book...** shows them all.
+- **Its personality grows from your last 7 days:** *Focused* (5+ focus sessions; it wears study glasses), *Loved* (40+ pats; rosy cheeks), *Night owl*, *Guardian* (10+ tabs closed) and *Claude's buddy* (20+ Claude tasks).
+- **Quiet mode:** `quiet = yes` makes it barely talk. It still visits, reacts and remembers, but drops the chit-chat. Patrol, reminders and Claude alerts still speak.
+- **Tools:** the **Tools** menu shows battery, free space on C:, memory use and uptime. **System check** gives a quick verdict, and the menu has one-click Screenshot, Task Manager, Calculator, Notepad and Lock PC. It warns you once a day if C: is nearly full.
 - **Stretch nudge:** after 90 minutes of non-stop activity (`stretch = 90`) it suggests a break. A 5-minute pause resets the clock, and it stays quiet during focus sessions, which have their own breaks.
 - When you type, it pulls out a laptop and taps along. It spots typing without a keyboard hook and never records which keys you press (see [Privacy](#privacy)).
 - Press Enter and it throws a rope at your text caret, or at the mouse pointer if the app doesn't expose a caret.
@@ -118,6 +123,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
 | `curious` | `yes` | Visit your window, comment, ask what you're doing |
 | `claude` | `yes` | React to Claude Code (after connecting it from the menu) |
 | `stretch` | `90` | Minutes of non-stop activity before a stretch nudge (`0` = off) |
+| `push` | `yes` | Nudge windows around; throw the pet into a window to knock it aside |
+| `quiet` | `no` | `yes` = barely talks (keeps only the important messages) |
 | `size` | `1` | Pet size, 0.5 to 4 (restart to apply) |
 | `focus` / `break` | `25` / `5` | Focus timer minutes |
 
@@ -160,7 +167,7 @@ GitHub Actions builds every push the same way, runs the self-test and attaches t
 - **No keylogging.** There's no keyboard hook. To detect typing it checks that new input arrived, that the mouse didn't move and that some text key is held down right now. All that feeds is an "is typing" level. It never records or stores which keys you press. The Enter rope only checks whether Enter is down.
 - **Clipboard:** it only looks at text copies of up to 2,000 characters. It skips anything marked private by password managers or clipboard-history exclusions, anything that looks like a key or token (`sk-`, `ghp_`, `github_pat_`, `AKIA`, `xox`, JWTs, PEM blocks), 4 to 8 digit codes, and single words that mix letters, digits and symbols like a password. Clipboard text stays in memory and is never written to disk. The one exception is when you pick a **Remind me** option: then the reminder's short message is saved to `reminders.txt`.
 - **Claude Code:** the hook passes only the event name, the session id, the project folder and Claude's notification text to the pet. It sends them through a local window message, and nothing leaves your PC. `~/.claude/settings.json` is changed only when you click **Connect** or **Disconnect**. That runs as a separate short-lived process, so the pet itself never loads a JSON library.
-- **What it writes:** `rules.txt`, `reminders.txt` and `progress.txt` (level, XP, counters, streak and achievements) in `%APPDATA%\PixelPet Focus`, plus the Run registry value if you tick **Start with Windows**.
+- **What it writes:** `rules.txt`, `reminders.txt`, `progress.txt` (level, XP, counters, streak, achievements and a 2-week daily tally) and `memories.txt` (the memory book, plain text) in `%APPDATA%\PixelPet Focus`, plus the Run registry value if you tick **Start with Windows**.
 
 ## Resource use
 
