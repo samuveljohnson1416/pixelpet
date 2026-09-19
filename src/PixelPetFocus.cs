@@ -230,6 +230,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static string fgProc = "", fgTitle = "", fgUrl = ""; static IntPtr fgHwnd;      // latest foreground snapshot, written by the watcher
     static double curiousT = 90, askT; static string curiousLine, lastActivity = ""; static bool curiousAsk; static DateTime curiousAt;
     static string doing = ""; static DateTime doingUntil;
+    // movie night: the flavour guessed from the title, a slow average of the volume to spot jump scares, and timers
+    static string movieGenre = ""; static double movieAvg, movieCool, movieChat = 15, movieLoud, movieQuiet, scaredT;
+    static bool MovieOn { get { return doing == "movie" && DateTime.Now < doingUntil; } }
     static readonly Dictionary<string, AgentSess> agents = new Dictionary<string, AgentSess>();   // Claude Code sessions, by session id
     static DateTime lastAgentXp; static int activeSec;
     static int closes, pats, focusDone, remDone, clipActs, claudeDone, streak, bestStreak, ach; static DateTime lastDay; static bool nightOwl;
@@ -438,6 +441,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
             noteT = Rand(0.6, 1.2);
             parts.Add(new Part { X = x + Rand(-7, 6) * U, Y = y - 11 * U, VY = -35 * S, Life = 1.5, Text = rnd.Next(2) == 0 ? "\u266A" : "\u266B" });
         }
+        MovieTick(dt);
         if (keyBurst >= 3 && cfg.Typing && alert == null && (state == SIT || state == WALK || state == SLEEP)) SetState(TYPE, 0);
         lapOpen = state != TYPE ? 0 : Clamp(lapOpen + (lastKeyAgo <= 2.5 ? dt : -dt) / 0.3, 0, 1);
         double lx = c.X, ly = c.Y;
@@ -724,6 +728,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static void ChooseNext()
     {
         double r = rnd.NextDouble();
+        if (MovieOn) { SetState(SIT, Rand(8, 15)); return; }                    // stay put and watch with you
         if (lastKind == 2 || (lastKind == 1 && r < 0.6)) { SetState(SIT, Rand(4, 8)); return; }   // class: don't distract
         if (CuriousVisit()) return;
         if (perch != IntPtr.Zero)
@@ -1344,6 +1349,54 @@ YouTube         | 240 | youtube.com/watch, - youtube
         else Chirp(line, 3.5);
     }
 
+    // Movie night: reacts to how loud the scene gets (jump scares, explosions, laughs), in the flavour of the title.
+    static string Pick(params string[] a) { return a[rnd.Next(a.Length)]; }
+    static void MovieTick(double dt)
+    {
+        if (!MovieOn) { if (movieGenre.Length > 0) movieGenre = ""; scaredT = 0; return; }
+        scaredT = Math.Max(0, scaredT - dt); movieCool -= dt; movieChat -= dt;
+        string g = TextTools.Genre(fgTitle); if (g.Length > 0) movieGenre = g;       // sticky: the title may change to "Netflix" in fullscreen
+        double pk = cfg.Audio ? audioPeak : 0;
+        bool calm = alert == null && (state == SIT || state == TYPE) && sign == null;
+        bool spike = pk > 0.12 && pk > movieAvg * 2.5 && movieCool <= 0 && movieLoud > 20;   // needs 20 s of sound first: no scare on the opening dialogue
+        movieAvg += (pk - movieAvg) * Math.Min(1, dt * 0.5);
+        if (pk > 0.01) { movieQuiet = 0; movieLoud += dt; }
+        else if ((movieQuiet += dt) > 20 && movieLoud > 1800) { movieLoud = 0; Chirp("Credits! Was it good?", 3); Hearts(3); joyT = 1.5; }
+        if (!calm) return;
+        if (spike) { movieCool = 7; Startle(); }
+        else if (movieChat <= 0) { movieChat = Rand(35, 70); Vibe(); }
+    }
+
+    static void Startle()
+    {
+        sqK = 0.8; sqT = 0.25;
+        parts.Add(new Part { X = x, Y = y - 12 * U, VY = -30 * S, Life = 0.8, Text = "!" });
+        bool ground = orient == 0 && perch == IntPtr.Zero;
+        switch (movieGenre)
+        {
+            case "horror": scaredT = 2.5; Chirp(Pick("AAAH!", "Nope nope nope!", "Who turned off the lights?!"), 2); if (ground) Hop(0, -420 * S); break;
+            case "comedy": joyT = 1.5; Chirp(Pick("HAHA!", "Good one!", "Hehehe!"), 1.8); break;
+            case "romance": joyT = 1.5; Hearts(4); Chirp(Pick("Awww!", "Kiss! Kiss!", "So sweet!"), 2); break;
+            case "action": Chirp(Pick("BOOM!", "Whoa!", "Did you see that?!"), 1.8); if (ground) Hop(0, -300 * S); break;
+            case "anim": joyT = 1.5; Chirp(Pick("Wheee!", "Yay!", "Again, again!"), 1.8); break;
+            default: Chirp(Pick("Whoa!", "Did that just happen?!"), 1.8); break;
+        }
+    }
+
+    static void Vibe()
+    {
+        switch (movieGenre)
+        {
+            case "horror": scaredT = 2; Chirp(Pick("Is it safe to look?", "Tell me when it's over.", "I'm not scared. You're scared."), 2.5); break;
+            case "romance": Hearts(3); Chirp(Pick("Aww, they're so cute together.", "*sniff*", "Kiss already!"), 2.5); break;
+            case "comedy": joyT = 1.2; Chirp(Pick("Ha ha ha!", "I can't breathe!", "*giggles*"), 2); break;
+            case "action": Chirp(Pick("Go go go!", "Behind you!", "Epic!"), 2); break;
+            case "anim": joyT = 1.2; Hearts(2); Chirp(Pick("So pretty!", "I love this one.", "Sing along!"), 2.5); break;
+            default: Chirp(Pick("*munch munch*", "Shh, best part!", "No spoilers!", "Pass the popcorn."), 2); break;
+        }
+        parts.Add(new Part { X = x + Rand(-3, 3) * U, Y = y - 8 * U, VY = -45 * S, Life = 0.9, Text = "\u2022" });   // a kernel pops
+    }
+
     static void AddDoingItems(IntPtr m)
     {
         string now = doing.Length == 0 ? "" : "  (now: " + doing + ")";
@@ -1354,6 +1407,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         AppendMenu(m, doing == "break" ? CHECK : 0, (UIntPtr)43, "Taking a break");
         AppendMenu(m, doing == "browse" ? CHECK : 0, (UIntPtr)44, "Just browsing");
         AppendMenu(m, doing == "leave" ? CHECK : 0, (UIntPtr)45, "Leave me alone (1 hour)");
+        AppendMenu(m, MovieOn ? CHECK : 0, (UIntPtr)46, "Movie night (3 hours, pauses patrol)");
     }
 
     static void AskMenu()
@@ -1363,12 +1417,13 @@ YouTube         | 240 | youtube.com/watch, - youtube
         AddDoingItems(m);
         IntPtr prev; int cmd = Popup(m, out prev);
         Restore(prev);
-        if (cmd >= 40 && cmd <= 45) Answer(cmd);
+        if (cmd >= 40 && cmd <= 46) Answer(cmd);
     }
 
     static void Answer(int cmd)
     {
         DateTime now = DateTime.Now; askT = 0; bubbleT = 0;
+        if (doing == "movie" && cmd != 46) lock (Sync) snoozeUntil = DateTime.MinValue;   // leaving movie night ends its patrol pause
         switch (cmd)
         {
             case 40: doing = "work"; doingUntil = now.AddMinutes(45); curiousT = Rand(900, 1500); Say("Got it. I'll keep it down.", 2.5); break;
@@ -1381,6 +1436,13 @@ YouTube         | 240 | youtube.com/watch, - youtube
             case 43: doing = "break"; doingUntil = now.AddMinutes(Math.Max(5, cfg.Break)); curiousT = Rand(60, 120); Say("Break time! Stretch those paws.", 2.5); Hearts(3); break;
             case 44: doing = "browse"; doingUntil = now.AddMinutes(30); curiousT = Rand(240, 480); Say("Have fun. No doomscrolling!", 2.5); break;
             case 45: doing = "leave"; doingUntil = now.AddHours(1); curiousT = 3600; Say("Okay. Quiet for an hour.", 2); return;
+            case 46:
+                if (MovieOn) { doing = ""; lock (Sync) snoozeUntil = DateTime.MinValue; Say("Movie's over. Back on patrol.", 2.5); return; }
+                doing = "movie"; doingUntil = now.AddHours(3); curiousT = 3 * 3600;
+                movieGenre = ""; movieAvg = movieLoud = movieQuiet = scaredT = 0; movieChat = 15; movieCool = 0;
+                lock (Sync) snoozeUntil = doingUntil;
+                if (state == WALK || state == SLEEP) SetState(SIT, 10);
+                Say("Movie night! Popcorn ready.", 3); Hearts(3); return;
         }
         joyT = 1.2;
     }
@@ -2486,7 +2548,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         }
         Px(2, dy, 10, 7, body);
 
-        bool up = joy || state == HELD || (sign != null && state != TYPE);   // holding up the reminder sign
+        bool up = joy || state == HELD || scaredT > 0 || (sign != null && state != TYPE);   // holding up the reminder sign
         bool swipeRaised = state == SWIPE && stateT < 0.25, swipeStrike = state == SWIPE && stateT >= 0.25;
         bool roping = ropeT >= 0; bool swinging = state == SWING; bool pushing = state == PUSH;
         bool leftBusy = pushing || (facing < 0 && (swipeRaised || swipeStrike || roping || swinging)), rightBusy = pushing || (facing > 0 && (swipeRaised || swipeStrike || roping || swinging));
@@ -2525,6 +2587,12 @@ YouTube         | 240 | youtube.com/watch, - youtube
             Px(facing > 0 ? 11 + shove : 0 - shove, 5.1 + dy, 3, 1.4, body);
         }
         if (swipeStrike) Px(facing > 0 ? 12 : -2, 3, 4, 2, body);
+        if (state == SIT && alert == null && sign == null && orient == 0 && MovieOn)   // popcorn bucket, munching now and then
+        {
+            Px(4.5, 4.8, 5, 3.2, ANGRY); Px(5.6, 4.8, 0.8, 3.2, WHITE); Px(7.6, 4.8, 0.8, 3.2, WHITE);
+            Px(5, 4.1, 1.1, 1, WHITE); Px(6.3, 3.8, 1.3, 1.2, STAR); Px(7.6, 4.1, 1.1, 1, WHITE);
+            if ((int)(animT * 3) % 4 == 0) Px(3.2, 3.6, 1.6, 1.6, body);
+        }
 
         if (sleeping || (blinkOn > 0 && !angry && !joy)) { Px(3.8, 3 + dy, 1.4, 0.5, EYE); Px(8.8, 3 + dy, 1.4, 0.5, EYE); }
         else if (joy) { Px(3, 3 + dy, 1, 1, EYE); Px(4, 2 + dy, 1, 1, EYE); Px(5, 3 + dy, 1, 1, EYE); Px(8, 3 + dy, 1, 1, EYE); Px(9, 2 + dy, 1, 1, EYE); Px(10, 3 + dy, 1, 1, EYE); }
@@ -2658,6 +2726,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
         ok(ParseReminder("sometime | nope", n0) == null && ParseReminder("every 20m 09:00-18:00 | eyes", n0).From == 540);
         ok(TextTools.Activity("Code", "main.py - Visual Studio Code", "") == "code");
         ok(TextTools.Activity("chrome", "A Talk - YouTube", "youtube.com/watch?v=a") == "video");
+        ok(TextTools.Genre("The Conjuring (2013) - VLC media player") == "horror" && TextTools.Genre("Titanic 1997 1080p.mkv") == "romance" && TextTools.Genre("Toy Story 3 - Netflix") == "anim");
+        ok(TextTools.Genre("Netflix") == "" && TextTools.Genre(null) == "" && TextTools.Genre("Avengers Endgame - YouTube") == "action");
         ok(TextTools.Activity("chrome", "YouTube Music", "music.youtube.com/watch?v=a") == "music");
         ok(TextTools.Activity("msedge", "Pull request #3", "github.com/a/b/pull/3") == "github");
         ok(TextTools.Activity("chrome", "Meet - abc", "meet.google.com/abc-defg") == "meeting" && TextTools.Activity("Zoom", "Zoom Meeting", "") == "meeting");
@@ -3167,6 +3237,18 @@ static class TextTools
             }
         }
         return sb.ToString().Replace("\\u003c", "<").Replace("\\u003e", ">").Replace("\\u0026", "&").Replace("\\u0027", "'");
+    }
+
+    // A movie's flavour from a window title (players show the file name, YouTube the film's name). "" = no idea.
+    public static string Genre(string title)
+    {
+        string t = (title ?? "").ToLowerInvariant();
+        if (Any(t, "horror", "conjuring", "insidious", "scream", "annabelle", "exorcis", "haunt", "ghost", "paranormal", "zombie", "sinister", "evil dead", "nightmare", "the nun", "poltergeist", "possess", "bhoot")) return "horror";
+        if (Any(t, "romance", "romantic", "love", "wedding", "notebook", "titanic", "valentine", "kiss", "pyaar", "ishq", "mohabbat", "rom-com")) return "romance";
+        if (Any(t, "comedy", "funny", "hangover", "stand-up", "standup", "sitcom", "bloopers", "laugh", "hilarious", "mr bean", "mr. bean")) return "comedy";
+        if (Any(t, "action", "fast & furious", "fast and furious", "avengers", "john wick", "mission impossible", "batman", "superman", "spider-man", "spiderman", "mad max", "transformers", "terminator", "rambo", "james bond", "kgf", "pushpa", "thriller", "heist", "marvel", "gladiator")) return "action";
+        if (Any(t, "animation", "animated", "pixar", "frozen", "toy story", "minions", "shrek", "kung fu panda", "cartoon", "anime", "naruto", "ghibli", "doraemon", "moana", "encanto", "bluey", "tom and jerry")) return "anim";
+        return "";
     }
 
     // What the foreground window is, from its process name, title and URL. "" = no idea.
