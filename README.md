@@ -9,7 +9,7 @@ PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no de
 **Doomscroll patrol**
 - Once a second it checks the window you're using: its title, its process name and, for browsers (Chrome, Edge, Firefox, Brave, Opera, Vivaldi, Arc, Chromium, LibreWolf, Zen), the address-bar URL, which it reads through UI Automation.
 - `rules.txt` gives each site its own grace time. By default that's 6 s for YouTube Shorts, Instagram Reels and TikTok, 45 s for Instagram, 90 s for Reddit and 4 min for YouTube videos. Swiping to the next reel doesn't restart the clock.
-- In the last few seconds it turns to stare at the window. When the grace time runs out, it runs over, glares through a short countdown and closes the tab: Ctrl+W for browsers, a normal close request for other apps. It only does this if the same window is still in front, so switching back to work in time saves you.
+- In the last few seconds it turns to stare at the window. When the grace time runs out, it runs over (or, if the window is far away and web-swing is on, swings there on its web), glares through a short countdown and closes the tab: Ctrl+W for browsers, a normal close request for other apps. It only does this if the same window is still in front, so switching back to work in time saves you.
 - Click the pet during the countdown to snooze it (5 min by default). Set `mode = nag` to make it complain without closing anything.
 - Meetings (Zoom, Teams, Google Meet) are on a "never touch" list.
 

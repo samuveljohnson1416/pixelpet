@@ -552,22 +552,28 @@ YouTube         | 240 | youtube.com/watch, - youtube
     // Web travel: shoot a strand to wherever the cursor is and swing there, on a big arc anchored
     // above the midpoint, so it reads as real travel rather than a teleport. Works from any state the
     // pet can safely leave unattended (walking, sitting, napping, typing, or hanging/climbing a wall).
-    static void StartSwing(int cursorX)
+    static bool StartSwing(int cursorX, bool forAlert = false)
     {
-        if (!cfg.WebTravel || alert != null || sign != null || held || hidden || webCool > 0) return;
-        if (state != SIT && state != WALK && state != SLEEP && state != TYPE && state != HANG && state != CLIMB) return;
+        if (!cfg.WebTravel || held || hidden) return false;
+        if (forAlert) { if (state == SWING || state == AIR || state == HELD) return false; }   // a doomscroll alert: from any calm or wall state
+        else
+        {
+            if (alert != null || sign != null || webCool > 0) return false;
+            if (state != SIT && state != WALK && state != SLEEP && state != TYPE && state != HANG && state != CLIMB) return false;
+        }
         double tx = Clamp((double)cursorX, wa.L + 8 * U, wa.R - 8 * U);
         double dist = Math.Abs(tx - x);
-        if (dist < 40 * S) { Say("Already here!", 1.2); return; }
+        if (dist < 40 * S) { if (!forAlert) Say("Already here!", 1.2); return false; }
         orient = 0; climbNext = 0; hangSleep = false; climbAfterWalk = false; perch = IntPtr.Zero; ignorePerch = IntPtr.Zero;
-        curiousLine = null; askT = 0; bubbleT = 0;
+        curiousLine = null; askT = 0; bubbleT = 0; pushTarget = IntPtr.Zero;
         swingSX = x; swingSY = y; swingTX = tx; swingTY = wa.B;
         double baseline = Math.Min(swingSY, swingTY);
         double rise = Clamp(dist * 0.45, 80 * S, Math.Max(40 * S, baseline - (wa.T + 14 * U)));
         swingAX = swingSX + (swingTX - swingSX) * 0.5;
         swingAY = baseline - rise;
         facing = swingTX >= swingSX ? 1 : -1;
-        SetState(SWING, Clamp(dist / (520 * S), 0.55, 1.7));
+        SetState(SWING, Clamp(dist / ((forAlert ? 700 : 520) * S), forAlert ? 0.45 : 0.55, forAlert ? 1.5 : 1.7));   // an alert is in a hurry
+        return true;
     }
 
     // A single quadratic bezier from start to target through an overhead control point: pure and
@@ -1508,12 +1514,14 @@ YouTube         | 240 | youtube.com/watch, - youtube
         {
             // a cute, deliberate landing rather than the usual fall: a solid squash, a happy line, a
             // scatter of dust and a couple of hearts, then a short cooldown before another swing.
-            sqK = 0.85; sqT = 0.25; vx = 0; vy = 0; webCool = 1.0; joyT = 1.2;
-            Chirp(LandingLines[rnd.Next(LandingLines.Length)], 1.8);
-            Hearts(2);
+            sqK = 0.85; sqT = 0.25; vx = 0; vy = 0; webCool = 1.0;
+            if (alert == null) { joyT = 1.2; Chirp(LandingLines[rnd.Next(LandingLines.Length)], 1.8); Hearts(2); }
             for (int i = 0; i < 5; i++)
                 parts.Add(new Part { X = x + Rand(-9, 9) * U, Y = y - Rand(0, 1.5) * U, VY = -Rand(18, 40) * S, Life = Rand(0.5, 0.9), Text = "\u00B7" });
-            if (alert != null) { if (perch != IntPtr.Zero) HopDown(); else SetState(RUN, 0); }
+            if (alert != null)
+            {
+                if (alert.CenterX == int.MinValue || Math.Abs(alert.CenterX - x) < 60 * S) StartGlare(); else SetState(RUN, 0);
+            }
             else SetState(SIT, Rand(1.5, 3));
             return;
         }
@@ -2164,6 +2172,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
     {
         b.Scold = b.Label.Contains("Short") ? Scolds[0] : Scolds[1 + rnd.Next(Scolds.Length - 1)];
         alert = b; bubbleT = 0; curiousLine = null; askT = 0;
+        if (state == SWING) return;                                             // Land() sees the alert and carries on from there
+        if (cfg.Wander && b.CenterX != int.MinValue && Math.Abs(Clamp((double)b.CenterX, wa.L + 8 * U, wa.R - 8 * U) - x) > 150 * S && StartSwing(b.CenterX, true)) return;
         if (orient != 0) LetGo(null);                                           // drops, then Land() sends it running
         else if (perch != IntPtr.Zero) HopDown();
         else if (state != AIR) SetState(RUN, 0);
@@ -2462,7 +2472,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (vibing) { double d = Math.Min(1, danceLevel * 1.6); sx *= 1 + 0.07 * d; sy *= 1 - 0.11 * d; }
 
         bool sleeping = state == SLEEP || hangSleep;
-        bool angry = angryT > 0 || state == RUN || state == GLARE || state == SWIPE;
+        bool angry = angryT > 0 || state == RUN || state == GLARE || state == SWIPE || (state == SWING && alert != null);
         bool joy = (joyT > 0 || (vibing && state == SIT) || state == SWING) && !angry;
         int body = angry ? ANGRY : onAC && chargeT > 2.3 && (int)(animT * 10) % 2 == 0 ? STAR : CORAL;   // zap flash on plug-in
         bool typing = state == TYPE;
