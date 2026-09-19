@@ -10,12 +10,14 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using Microsoft.Win32;
+using System.Web.Script.Serialization;
 
 class Rule { public string Label; public int Grace; public string[] Any; }
 
 class Cfg
 {
-    public int Countdown = 3, Snooze = 5, Focus = 25, Break = 5;
+    public int Countdown = 3, Snooze = 5, Focus = 25, Break = 5, Stretch = 90;
+    public bool Claude = true;
     public bool Nag, Wander = true, Sleepy = true, Typing = true, EnterRope = true, Climb = true, Audio = true, Clipboard = true, Hotkey = true, Curious = true;
     public double Size = 1;
     public string[] Never = new string[0];
@@ -23,6 +25,8 @@ class Cfg
 }
 
 class Reminder { public string Line, Kind, Msg; public DateTime At, Next; public int Every, From = -1, To = -1; }
+
+class AgentSess { public string State = "", Project = ""; public DateTime Since, Seen, LastPing; }
 
 class Bust { public IntPtr Hwnd; public string Title, Proc, Label, Scold; public int CenterX; }
 
@@ -48,6 +52,8 @@ audio = yes        # wears headphones when they're connected; dances to music, t
 size = 1           # pet size multiplier (restart)
 focus = 25         # focus timer minutes
 break = 5          # break minutes
+stretch = 90       # nudge to stretch after this many minutes of non-stop activity (0 = off)
+claude = yes       # reacts when Claude Code works, needs you, or finishes (connect it from the menu)
 
 # Never touch: any window containing one of these is left alone
 never | zoom meeting, microsoft teams, google meet
@@ -114,6 +120,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
                     case "snooze": c.Snooze = Math.Max(1, n); break;
                     case "focus": c.Focus = Math.Max(1, n); break;
                     case "break": c.Break = Math.Max(1, n); break;
+                    case "stretch": c.Stretch = Math.Max(0, n); break;
+                    case "claude": c.Claude = yes; break;
                     case "mode": c.Nag = v == "nag"; break;
                     case "wander": c.Wander = yes; break;
                     case "sleepy": c.Sleepy = yes; break;
@@ -212,7 +220,16 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static readonly StringBuilder clsBuf = new StringBuilder(64);
     static string fgProc = "", fgTitle = "", fgUrl = ""; static IntPtr fgHwnd;      // latest foreground snapshot, written by the watcher
     static double curiousT = 90, askT; static string curiousLine, lastActivity = ""; static bool curiousAsk; static DateTime curiousAt;
-    static string doing = ""; static DateTime doingUntil;                        // your quick-reply answer and how long it holds
+    static string doing = ""; static DateTime doingUntil;
+    static readonly Dictionary<string, AgentSess> agents = new Dictionary<string, AgentSess>();   // Claude Code sessions, by session id
+    static DateTime lastAgentXp; static int activeSec;
+    static int closes, pats, focusDone, remDone, clipActs, claudeDone, streak, bestStreak, ach; static DateTime lastDay; static bool nightOwl;
+    const int CAP = 0xC86E3C, HEADBAND = 0x3C3CDC;
+    static readonly string[] AchNames = { "First patrol", "Doomscroll slayer", "Deep focus", "Focus machine", "Remembered!", "Clipboard pro",
+        "Claude buddy", "Pair programmer", "On a roll", "Week warrior", "Night owl", "Companion", "Hero", "Legend" };
+    static readonly string[] AchHow = { "close a doomscroll tab", "close 25 of them", "finish a focus session", "finish 25 focus sessions",
+        "finish a reminder", "use 10 clipboard actions", "Claude Code finishes a task", "Claude Code finishes 100 tasks",
+        "3-day streak", "7-day streak", "be active after midnight", "reach level 5", "reach level 20", "reach level 35" };                        // your quick-reply answer and how long it holds
     static readonly string[] Codes = { "{ }", "01", ";", "</>", "#", "=>", "()" };
     static double secAcc;
 
@@ -227,6 +244,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static void Main(string[] args)
     {
         if (args.Length > 0 && args[0] == "--selftest") { Environment.Exit(SelfTest()); }
+        if (args.Length > 0 && args[0] == "--claude-hook") { ForwardHook(); return; }             // run by Claude Code on its events
+        if (args.Length > 0 && (args[0] == "--connect-claude" || args[0] == "--disconnect-claude")) { Environment.Exit(ClaudeSetup.Run(args[0] == "--connect-claude")); }
         bool created; var mutex = new Mutex(true, "PixelPetFocus.Single", out created);
         if (!created) { PostMessage(FindWindow("PixelPetFocus", null), 0x8003, IntPtr.Zero, IntPtr.Zero); return; }   // 2nd launch: open Settings
 
@@ -241,7 +260,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         RemPath = Path.Combine(Dir, "reminders.txt");
         if (!File.Exists(RulesPath)) File.WriteAllText(RulesPath, DefaultRules);
         cfg = Parse(File.ReadAllLines(RulesPath));
-        try { var p = File.ReadAllText(ProgressPath).Split(' '); level = Math.Max(1, int.Parse(p[0])); xp = int.Parse(p[1]); } catch { }
+        LoadProgress();
 
         U = Math.Max(2, (int)Math.Round(5 * S * cfg.Size));
         W = Math.Max((int)(260 * S), 22 * U);
@@ -302,6 +321,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         {
             case 0x0113: Tick(); return IntPtr.Zero;                   // WM_TIMER
             case 0x8003: OpenSettings(); return IntPtr.Zero;              // from a second launch
+            case 0x004A: OnCopyData(l); return (IntPtr)1;                  // WM_COPYDATA from --claude-hook
             case 0x0021: return (IntPtr)3;                             // WM_MOUSEACTIVATE -> MA_NOACTIVATE
             case 0x0014: return (IntPtr)1;                             // WM_ERASEBKGND
             case 0x000F: if (h == ropeWnd) PaintRope(); else Render(); break;   // WM_PAINT (DefWindowProc validates)
@@ -355,6 +375,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 var left = focusEnd - DateTime.Now; if (left.Ticks < 0) left = TimeSpan.Zero;
                 tagCache = (focusPhase == 1 ? "Focus " : "Break ") + (int)left.TotalMinutes + ":" + left.Seconds.ToString("00");
             }
+            StretchCheck();
+            string agentTag = AgentTag();
+            if (tagCache == null) tagCache = agentTag;
             if (++gcSec % 10 == 0) GC.Collect();   // .NET otherwise lets short-lived garbage pile up for MBs before collecting
         }
 
@@ -469,7 +492,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                     {
                         Say("Closed. Back to work!", 2.4); joyT = 2.4;
                         lock (Sync) cooldownUntil = DateTime.Now.AddSeconds(12);
-                        Award(25);
+                        Award(25); Did(ref closes);
                     }
                     else Say(why, 2.4);
                 }
@@ -622,6 +645,239 @@ YouTube         | 240 | youtube.com/watch, - youtube
         else if (r < 0.9 && cfg.Wander) { POINT c; GetCursorPos(out c); Walk(c.X); }   // come see what you're doing
         else if (r < 0.96) Hop(0, -520 * S);
         else SetState(SIT, Rand(2, 5));
+    }
+
+    // ------------------------------------------------------------------ Claude Code status (idea from AgentPet, MIT)
+    // Claude Code runs `PixelPetFocus.exe --claude-hook` on UserPromptSubmit / Notification / Stop / SessionEnd.
+    // That short-lived process forwards the event here over WM_COPYDATA and exits; the pet reacts.
+    static void ForwardHook()
+    {
+        string json = "";
+        var t = new Thread(delegate () { try { json = new StreamReader(Console.OpenStandardInput(), Encoding.UTF8).ReadToEnd(); } catch { } });
+        t.IsBackground = true; t.Start(); t.Join(1500);                          // never hold Claude Code up
+        if (json.Length > 200000) json = json.Substring(0, 200000);
+        string ev = TextTools.JsonField(json, "hook_event_name");
+        if (ev.Length == 0) return;
+        string data = ev + "\n" + TextTools.JsonField(json, "session_id") + "\n" + TextTools.JsonField(json, "cwd") + "\n" + TextTools.JsonField(json, "message");
+        IntPtr w = FindWindow("PixelPetFocus", "PixelPet Focus");
+        if (w == IntPtr.Zero) return;                                            // pet not running: nothing to do
+        var cds = new COPYDATASTRUCT { dwData = (IntPtr)0x5050, cbData = (data.Length + 1) * 2, lpData = Marshal.StringToHGlobalUni(data) };
+        IntPtr res;
+        SendMessageTimeout(w, 0x004A, IntPtr.Zero, ref cds, 2, 1000, out res);   // SMTO_ABORTIFHUNG
+        Marshal.FreeHGlobal(cds.lpData);
+    }
+
+    static void OnCopyData(IntPtr l)
+    {
+        var cds = (COPYDATASTRUCT)Marshal.PtrToStructure(l, typeof(COPYDATASTRUCT));
+        if (cds.dwData != (IntPtr)0x5050 || cds.cbData <= 0 || cds.cbData > 8192 || cds.lpData == IntPtr.Zero) return;
+        var f = Marshal.PtrToStringUni(cds.lpData, cds.cbData / 2).TrimEnd('\0').Split('\n');
+        if (f.Length >= 4) OnAgentEvent(f[0], f[1], f[2], f[3]);
+    }
+
+    static void OnAgentEvent(string ev, string sid, string cwd, string msg)
+    {
+        if (!cfg.Claude) return;
+        DateTime now = DateTime.Now;
+        if (sid.Length == 0) sid = cwd;
+        if (ev == "SessionEnd") { agents.Remove(sid); return; }
+        string st = ev == "UserPromptSubmit" || ev == "PreToolUse" ? "working" : ev == "Notification" ? "waiting" : ev == "Stop" ? "done" : "";
+        if (st.Length == 0) return;
+        AgentSess a;
+        if (!agents.TryGetValue(sid, out a)) { a = new AgentSess(); agents[sid] = a; }
+        a.Project = TextTools.ProjectName(cwd); a.Seen = now;
+        if (a.State != st) { a.State = st; a.Since = now; }
+        string proj = a.Project.Length > 0 ? " (" + a.Project + ")" : "";
+        bool free = alert == null && sign == null;
+        if (st == "waiting")
+        {
+            if ((now - a.LastPing).TotalSeconds < 60) return;                      // one nudge a minute per session
+            a.LastPing = now;
+            string text = msg.ToLowerInvariant().Contains("permission") ? "Claude needs your OK" + proj + "!" : "Claude is waiting for you" + proj + ".";
+            MessageBeep(0x30);
+            if (hidden) Tray(1, "Claude Code", text);
+            if (!free) return;
+            Say(text, 6); joyT = 3;                                              // arms up, waving you over
+            if (orient == 0 && (state == SIT || state == WALK || state == SLEEP || state == TYPE)) { POINT c; GetCursorPos(out c); Walk(c.X); }
+        }
+        else if (st == "done")
+        {
+            Did(ref claudeDone);
+            if (hidden) Tray(1, "Claude Code", "Claude finished" + proj + ".");
+            if (!free) return;
+            Say("Claude finished" + proj + "!", 4); Hearts(4);
+            if (orient == 0 && (state == SIT || state == WALK || state == SLEEP)) Hop(0, -520 * S);
+            if ((now - lastAgentXp).TotalSeconds >= 30) { lastAgentXp = now; Award(10); }
+        }
+    }
+
+    // A tag above the pet while Claude works or waits; also drops sessions that went quiet.
+    static string AgentTag()
+    {
+        DateTime now = DateTime.Now, since = now; int working = 0, waiting = 0;
+        List<string> stale = null;
+        foreach (var kv in agents)
+        {
+            var a = kv.Value;
+            if (now - a.Seen > TimeSpan.FromHours(3) || (a.State == "done" && now - a.Since > TimeSpan.FromMinutes(15)))
+            {
+                if (stale == null) stale = new List<string>();
+                stale.Add(kv.Key); continue;
+            }
+            if (a.State == "working" && now - a.Seen > TimeSpan.FromMinutes(30)) a.State = "idle";   // interrupted without a Stop
+            if (a.State == "working") { working++; if (a.Since < since) since = a.Since; }
+            else if (a.State == "waiting" && now - a.Since < TimeSpan.FromMinutes(3)) waiting++;
+        }
+        if (stale != null) foreach (var k in stale) agents.Remove(k);
+        if (!cfg.Claude) return null;
+        if (waiting > 0) return waiting == 1 ? "Claude needs you" : waiting + " Claudes need you";
+        if (working == 1) return "Claude working " + Dur(now - since);
+        if (working > 1) return working + " Claudes working";
+        return null;
+    }
+
+    static string Dur(TimeSpan d) { return d.TotalHours >= 1 ? (int)d.TotalHours + "h" + d.Minutes.ToString("00") : (int)d.TotalMinutes + ":" + d.Seconds.ToString("00"); }
+
+    static bool ClaudeConnected()
+    {
+        try
+        {
+            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "settings.json");
+            return File.Exists(path) && File.ReadAllText(path).Contains("--claude-hook");
+        }
+        catch { return false; }
+    }
+
+    static void AddClaudeItems(IntPtr m)
+    {
+        bool connected = ClaudeConnected(); int shown = 0; DateTime now = DateTime.Now;
+        foreach (var kv in agents)
+        {
+            var a = kv.Value;
+            if (a.State.Length == 0) continue;
+            string what = a.State == "waiting" ? "needs you" : a.State;
+            AppendMenu(m, GRAY, UIntPtr.Zero, Menuish((a.Project.Length > 0 ? a.Project : "session") + "  -  " + what + "  " + Dur(now - a.Since)));
+            shown++;
+        }
+        if (shown == 0) AppendMenu(m, GRAY, UIntPtr.Zero, connected ? "No Claude Code activity yet" : "Not connected");
+        AppendMenu(m, SEP, UIntPtr.Zero, null);
+        AppendMenu(m, 0, (UIntPtr)(connected ? 51 : 50), connected ? "Disconnect Claude Code" : "Connect Claude Code...");
+    }
+
+    // ------------------------------------------------------------------ progress, streaks, achievements, ranks (ideas from AgentPet)
+    static string Rank(int lv) { return lv >= 35 ? "Legend" : lv >= 20 ? "Hero" : lv >= 10 ? "Scout" : lv >= 5 ? "Companion" : "Hatchling"; }
+    static int NextRank(int lv) { return lv < 5 ? 5 : lv < 10 ? 10 : lv < 20 ? 20 : lv < 35 ? 35 : 0; }
+
+    // Level looks: a sprout, an explorer cap, a hero headband, a crown. Hats step aside for headphones.
+    static void DrawRank(int dy, bool phones)
+    {
+        if (level >= 35) { if (!phones) { Px(4, dy - 1, 6, 1, STAR); Px(4, dy - 2, 1, 1, STAR); Px(6.5, dy - 2, 1, 1, STAR); Px(9, dy - 2, 1, 1, STAR); Px(6.7, dy - 0.8, 0.6, 0.6, PINK); } }
+        else if (level >= 20) { Px(2, dy + 1, 10, 0.7, HEADBAND); Px(12, dy + 1.1, 1.4, 0.5, HEADBAND); Px(12.8, dy + 1.5, 1, 0.5, HEADBAND); }
+        else if (level >= 10) { if (!phones) { Px(3, dy - 1, 8, 1, CAP); Px(facing > 0 ? 10 : 1, dy - 0.35, 3, 0.4, CAP); } }
+        else if (level >= 5) { if (!phones) { Px(6.7, dy - 1.2, 0.6, 1.2, GREEN); Px(7.3, dy - 1.9, 1.4, 0.8, GREEN); Px(5.4, dy - 1.6, 1.3, 0.6, GREEN); } }
+    }
+
+    static void Did(ref int counter)
+    {
+        counter++;
+        DateTime today = DateTime.Today;
+        if (lastDay != today)
+        {
+            streak = lastDay == today.AddDays(-1) ? streak + 1 : 1; lastDay = today;
+            if (streak > bestStreak) bestStreak = streak;
+        }
+        if (DateTime.Now.Hour < 4) nightOwl = true;
+        CheckAch();
+        SaveProgress();
+    }
+
+    static bool AchMet(int i)
+    {
+        switch (i)
+        {
+            case 0: return closes >= 1; case 1: return closes >= 25;
+            case 2: return focusDone >= 1; case 3: return focusDone >= 25;
+            case 4: return remDone >= 1; case 5: return clipActs >= 10;
+            case 6: return claudeDone >= 1; case 7: return claudeDone >= 100;
+            case 8: return streak >= 3; case 9: return streak >= 7; case 10: return nightOwl;
+            case 11: return level >= 5; case 12: return level >= 20; case 13: return level >= 35;
+        }
+        return false;
+    }
+
+    static void CheckAch()
+    {
+        for (int i = 0; i < AchNames.Length; i++)
+        {
+            if ((ach & (1 << i)) != 0 || !AchMet(i)) continue;
+            ach |= 1 << i;
+            Say("Achievement: " + AchNames[i] + "!", 4); joyT = 2.5; Hearts(5); MessageBeep(0x40);
+            SaveProgress();
+            return;                                                              // one at a time; the next shows on the next event
+        }
+    }
+
+    static void AddStatsItems(IntPtr m)
+    {
+        int next = NextRank(level), cur = lastDay >= DateTime.Today.AddDays(-1) ? streak : 0, got = 0;
+        for (int i = 0; i < AchNames.Length; i++) if ((ach & (1 << i)) != 0) got++;
+        AppendMenu(m, GRAY, UIntPtr.Zero, "Rank: " + Rank(level) + (next > 0 ? "  (next rank at level " + next + ")" : "  (top rank)"));
+        AppendMenu(m, GRAY, UIntPtr.Zero, "Tabs closed: " + closes + "     Pats: " + pats);
+        AppendMenu(m, GRAY, UIntPtr.Zero, "Focus sessions: " + focusDone + "     Reminders done: " + remDone);
+        AppendMenu(m, GRAY, UIntPtr.Zero, "Clipboard actions: " + clipActs + "     Claude tasks: " + claudeDone);
+        AppendMenu(m, GRAY, UIntPtr.Zero, "Streak: " + cur + (cur == 1 ? " day" : " days") + "   (best " + bestStreak + ")");
+        AppendMenu(m, SEP, UIntPtr.Zero, null);
+        AppendMenu(m, GRAY, UIntPtr.Zero, "Achievements " + got + " / " + AchNames.Length);
+        for (int i = 0; i < AchNames.Length; i++)
+            AppendMenu(m, GRAY | ((ach & (1 << i)) != 0 ? CHECK : 0), UIntPtr.Zero, AchNames[i] + "  -  " + AchHow[i]);
+    }
+
+    static void SaveProgress()
+    {
+        try
+        {
+            File.WriteAllText(ProgressPath, "level=" + level + "\r\nxp=" + xp + "\r\ncloses=" + closes + "\r\npats=" + pats + "\r\nfocus=" + focusDone
+                + "\r\nreminders=" + remDone + "\r\nclipboard=" + clipActs + "\r\nclaude=" + claudeDone + "\r\nstreak=" + streak + "\r\nbest=" + bestStreak
+                + "\r\nlastday=" + (lastDay == DateTime.MinValue ? "" : lastDay.ToString("yyyy-MM-dd", Inv)) + "\r\nowl=" + (nightOwl ? 1 : 0) + "\r\nach=" + ach + "\r\n");
+        }
+        catch { }
+    }
+
+    static void LoadProgress()
+    {
+        try
+        {
+            string text = File.ReadAllText(ProgressPath).Trim();
+            if (!text.Contains("=")) { var p = text.Split(' '); level = Math.Max(1, int.Parse(p[0])); xp = int.Parse(p[1]); return; }   // old "level xp" file
+            foreach (var line in text.Split('\n'))
+            {
+                int eq = line.IndexOf('=');
+                if (eq < 0) continue;
+                string k = line.Substring(0, eq).Trim(), v = line.Substring(eq + 1).Trim(); int n; int.TryParse(v, NumberStyles.Integer, Inv, out n);
+                switch (k)
+                {
+                    case "level": level = Math.Max(1, n); break; case "xp": xp = Math.Max(0, n); break;
+                    case "closes": closes = n; break; case "pats": pats = n; break; case "focus": focusDone = n; break;
+                    case "reminders": remDone = n; break; case "clipboard": clipActs = n; break; case "claude": claudeDone = n; break;
+                    case "streak": streak = n; break; case "best": bestStreak = n; break; case "owl": nightOwl = n == 1; break; case "ach": ach = n; break;
+                    case "lastday": DateTime d; if (DateTime.TryParseExact(v, "yyyy-MM-dd", Inv, DateTimeStyles.None, out d)) lastDay = d; break;
+                }
+            }
+        }
+        catch { }
+    }
+
+    // ------------------------------------------------------------------ stretch nudge (idea from AgentPet's break reminder)
+    static uint IdleMs() { var li = new LASTINPUTINFO(); li.cbSize = 8; GetLastInputInfo(ref li); return (uint)Environment.TickCount - li.dwTime; }
+
+    static void StretchCheck()
+    {
+        if (IdleMs() > 5 * 60 * 1000 || focusPhase != 0) { activeSec = 0; return; }   // a 5-minute pause counts as a break; focus has its own
+        activeSec++;
+        if (cfg.Stretch <= 0 || activeSec < cfg.Stretch * 60 || alert != null || sign != null) return;
+        activeSec = 0;
+        Say("You've been at it for " + cfg.Stretch + " minutes. Stretch those legs?", 6); joyT = 2; MessageBeep(0x40);
+        if (orient == 0 && (state == SIT || state == WALK || state == SLEEP)) Hop(0, -600 * S);
     }
 
     // ------------------------------------------------------------------ curious visits
@@ -919,7 +1175,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (hangSleep) { hangSleep = false; angryT = 1.5; Say("Hmph. Bat nap ruined.", 2); SetState(HANG, 2); return; }
         joyT = 1.6; Hearts(3);
         if (state != AIR && state != TYPE && orient == 0) Hop(0, -420 * S);
-        if ((DateTime.Now - lastPat).TotalSeconds >= 4) { lastPat = DateTime.Now; Award(5); }
+        if ((DateTime.Now - lastPat).TotalSeconds >= 4) { lastPat = DateTime.Now; Award(5); Did(ref pats); }
     }
 
     static void Hearts(int n)
@@ -932,9 +1188,15 @@ YouTube         | 240 | youtube.com/watch, - youtube
     {
         xp += n; int gained = 0;
         while (xp >= Cost(level) && gained < 50) { xp -= Cost(level); level++; gained++; }
-        try { File.WriteAllText(ProgressPath, level + " " + xp); } catch { }
+        SaveProgress();
         parts.Add(new Part { X = x, Y = y - 11 * U, VY = -40 * S, Life = 1.4, Text = "+" + n + " XP" });
-        if (gained > 0) { Say("Level " + level + "!", 3); joyT = 3; Hearts(6); }
+        if (gained > 0)
+        {
+            string was = Rank(level - gained);
+            Say(Rank(level) != was ? "Level " + level + "! Evolved into a " + Rank(level) + "!" : "Level " + level + "!", 3.5);
+            joyT = 3; Hearts(6);
+            CheckAch();
+        }
     }
 
     // hooks for the Settings window (Settings.cs runs on its own thread; cfg is volatile, patrol is volatile)
@@ -988,7 +1250,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (focusPhase == 0 || DateTime.Now < focusEnd) return;
         if (focusPhase == 1)
         {
-            focusPhase = 2; focusEnd = DateTime.Now.AddMinutes(cfg.Break);
+            focusPhase = 2; focusEnd = DateTime.Now.AddMinutes(cfg.Break); Did(ref focusDone);
             Say("Break time! Stretch a bit.", 6);
         }
         else { focusPhase = 0; Say("Break's over. Ready?", 6); }
@@ -1013,7 +1275,10 @@ YouTube         | 240 | youtube.com/watch, - youtube
             AppendMenu(m, 0, (UIntPtr)34, "Tomorrow 9:00");
             AppendMenu(m, SEP, UIntPtr.Zero, null);
         }
-        AppendMenu(m, GRAY, UIntPtr.Zero, "Level " + level + "   " + xp + " / " + Cost(level) + " XP");
+        AppendMenu(m, GRAY, UIntPtr.Zero, "Level " + level + " " + Rank(level) + "   " + xp + " / " + Cost(level) + " XP");
+        IntPtr stats = CreatePopupMenu();
+        AddStatsItems(stats);
+        AppendMenu(m, POPUP, Sub(stats), "Stats && achievements");
         if (powerKnown != 0 && batteryPct >= 0) AppendMenu(m, GRAY, UIntPtr.Zero, "Battery " + batteryPct + "%" + (onAC ? " (charging)" : ""));
         if (cfg.Audio && (headphones || audioKind != 0))
         {
@@ -1047,6 +1312,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
         IntPtr dm = CreatePopupMenu();
         AddDoingItems(dm);
         AppendMenu(m, POPUP, Sub(dm), "What I'm doing");
+        IntPtr cm = CreatePopupMenu();
+        AddClaudeItems(cm);
+        AppendMenu(m, POPUP, Sub(cm), "Claude Code");
         AppendMenu(m, SEP, UIntPtr.Zero, null);
         AppendMenu(m, 0, (UIntPtr)20, "Settings...");
         AppendMenu(m, auto ? CHECK : 0, (UIntPtr)21, "Start with Windows");
@@ -1080,6 +1348,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
             case 23: DestroyWindow(hwnd); break;
             case 24: LoadReminders(); ShellExecute(IntPtr.Zero, "open", "notepad.exe", "\"" + RemPath + "\"", null, 1); break;
             case 25: pauseRecurring = !pauseRecurring; Say(pauseRecurring ? "Recurring reminders paused." : "Recurring reminders on.", 2); break;
+            case 50: case 51:
+                ShellExecute(IntPtr.Zero, "open", System.Reflection.Assembly.GetEntryAssembly().Location, cmd == 50 ? "--connect-claude" : "--disconnect-claude", null, 1);
+                break;
             case 40: case 41: case 42: case 43: case 44: case 45: Answer(cmd); break;
             case 30: if (sign != null) ReminderDone(); break;
             case 31: if (sign != null) ReminderSnooze(now.AddMinutes(5)); break;
@@ -1214,7 +1485,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
             case 114: if (SetClip(clipText.ToLowerInvariant())) Say("done.", 1.5); break;
             case 115: if (SetClip(Inv.TextInfo.ToTitleCase(clipText.ToLowerInvariant()))) Say("Done.", 1.5); break;
         }
-        joyT = 1;
+        joyT = 1; Did(ref clipActs);
         return true;
     }
 
@@ -1381,6 +1652,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         else FindLive(r).Next = r.Kind == "every" ? now.AddMinutes(r.Every) : NextDaily(r, now);
         joyT = 1.5; Hearts(3); Say("Nice.", 1.5);
         if (signT <= 120) Award(5);
+        Did(ref remDone);
     }
 
     static void ReminderSnooze(DateTime until)
@@ -1793,6 +2065,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         else if (angry) { Px(3.5 + lookX, 2 + dy, 1, 1, EYE); Px(4.5 + lookX, 3 + dy, 1, 1, EYE); Px(9.5 + lookX, 2 + dy, 1, 1, EYE); Px(8.5 + lookX, 3 + dy, 1, 1, EYE); }
         else { Px(4 + lookX, 2 + lookY + dy, 1, 2, EYE); Px(9 + lookX, 2 + lookY + dy, 1, 2, EYE); }
 
+        DrawRank(dy, wasPhones);
         if (wasPhones)
         {
             Px(2.4, dy - 1.2, 9.2, 0.7, DARK);                                      // band over the head
@@ -1924,6 +2197,13 @@ YouTube         | 240 | youtube.com/watch, - youtube
         ok(TextTools.Activity("explorer", "Downloads", "") == "files" && TextTools.Activity("explorer", "", "") == "");
         ok(TextTools.Activity("chrome", "Some page", "example.org/x") == "browse" && TextTools.Activity("someapp", "Thing", "") == "");
         ok(TextTools.Comment("video", "work", rnd) == "Weren't you working?" && TextTools.Comment("", "", rnd) == null && TextTools.Comment("code", "", rnd) != null);
+        ok(TextTools.JsonField("{\"session_id\":\"abc\", \"hook_event_name\" : \"Stop\"}", "hook_event_name") == "Stop");
+        ok(TextTools.JsonField("{\"cwd\":\"C:\\\\Users\\\\me\\\\proj\"}", "cwd") == "C:\\Users\\me\\proj");
+        ok(TextTools.JsonField("{\"prompt\":\"say \\\"cwd\\\" here\",\"cwd\":\"D:/x\"}", "cwd") == "D:/x" && TextTools.JsonField("{}", "cwd") == "");
+        ok(TextTools.ProjectName("C:\\Users\\me\\pixelpet\\") == "pixelpet" && TextTools.ProjectName("/home/me/api") == "api" && TextTools.ProjectName("") == "");
+        ok(TextTools.Pretty("{\"a\":[1,{\"b\":\"x,y\"}],\"c\":{}}") == "{\n  \"a\": [\n    1,\n    {\n      \"b\": \"x,y\"\n    }\n  ],\n  \"c\": {}\n}");
+        ok(Rank(1) == "Hatchling" && Rank(5) == "Companion" && Rank(19) == "Scout" && Rank(35) == "Legend" && NextRank(35) == 0);
+        ok(AchNames.Length == AchHow.Length && AchNames.Length <= 31);
         return fails;
     }
 
@@ -1932,6 +2212,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
     [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int L, T, R, B; }
     [StructLayout(LayoutKind.Sequential)] struct LASTINPUTINFO { public uint cbSize, dwTime; }
+    [StructLayout(LayoutKind.Sequential)] struct COPYDATASTRUCT { public IntPtr dwData; public int cbData; public IntPtr lpData; }
+    [DllImport("user32.dll")] static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, ref COPYDATASTRUCT l, uint flags, uint timeout, out IntPtr result);
     [StructLayout(LayoutKind.Sequential)] struct SYSTEM_POWER_STATUS { public byte ACLineStatus, BatteryFlag, BatteryLifePercent, SystemStatusFlag; public int BatteryLifeTime, BatteryFullLifeTime; }
     [DllImport("kernel32.dll")] static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS s);
     [DllImport("user32.dll")] static extern bool AddClipboardFormatListener(IntPtr h);
@@ -1971,7 +2253,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     [DllImport("user32.dll")] static extern uint GetDpiForSystem();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern ushort RegisterClassEx(ref WNDCLASSEX wc);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateWindowEx(int ex, string cls, string title, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr inst, IntPtr param);
-    [DllImport("user32.dll")] static extern IntPtr DefWindowProc(IntPtr h, uint m, IntPtr w, IntPtr l);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr DefWindowProc(IntPtr h, uint m, IntPtr w, IntPtr l);   // W, to match the Unicode class (the A version cut the title to "P")
     [DllImport("user32.dll")] static extern int GetMessage(out MSG m, IntPtr h, uint a, uint b);
     [DllImport("user32.dll")] static extern bool TranslateMessage(ref MSG m);
     [DllImport("user32.dll")] static extern IntPtr DispatchMessage(ref MSG m);
@@ -2039,6 +2321,77 @@ YouTube         | 240 | youtube.com/watch, - youtube
     [DllImport("shell32.dll")] static extern bool Shell_NotifyIcon(int op, ref NID data);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern IntPtr ExtractIcon(IntPtr inst, string file, int index);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern IntPtr ShellExecute(IntPtr h, string op, string file, string args, string dir, int show);
+}
+
+// ---------------------------------------------------------------------- Claude Code hook installer (runs as `--connect-claude`, its own process)
+// Adds or removes our hook entries in ~/.claude/settings.json. Entries are ours when their command contains
+// "--claude-hook", so other hooks are never touched. The old file is backed up first.
+static class ClaudeSetup
+{
+    static readonly string[] Events = { "UserPromptSubmit", "Notification", "Stop", "SessionEnd" };
+
+    public static int Run(bool connect)
+    {
+        string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "settings.json");
+        string cmd = "\"" + System.Reflection.Assembly.GetEntryAssembly().Location.Replace('\\', '/') + "\" --claude-hook";
+        if (connect && MessageBox(IntPtr.Zero, "PixelPet will add hooks to\n" + path + "\n\nso it can react when Claude Code is working, needs you, or finishes. " +
+            "A backup of the current file is saved next to it. If you move PixelPetFocus.exe later, connect again.\n\nContinue?", "Connect Claude Code", 0x40021) != 1) return 1;
+        try
+        {
+            Apply(path, connect, cmd);
+            MessageBox(IntPtr.Zero, connect ? "Connected. New Claude Code sessions will tell PixelPet when they work, need you, or finish."
+                                            : "Disconnected. PixelPet's hooks were removed from settings.json.", "Claude Code", 0x40040);
+            return 0;
+        }
+        catch (Exception e)
+        {
+            MessageBox(IntPtr.Zero, "Couldn't update " + path + ":\n" + e.Message + "\n\nNothing was changed.", "Claude Code", 0x40030);
+            return 2;
+        }
+    }
+
+    // The file edit itself, no dialogs (also what the test harness calls on a copy).
+    public static void Apply(string path, bool connect, string cmd)
+    {
+        {
+            var js = new JavaScriptSerializer();
+            Dictionary<string, object> root = File.Exists(path) ? js.DeserializeObject(File.ReadAllText(path)) as Dictionary<string, object> : new Dictionary<string, object>();
+            if (root == null) throw new InvalidDataException("settings.json is not a JSON object");
+            object h; Dictionary<string, object> hooks = null;
+            if (root.TryGetValue("hooks", out h)) { hooks = h as Dictionary<string, object>; if (hooks == null) throw new InvalidDataException("\"hooks\" is not an object"); }
+            else hooks = new Dictionary<string, object>();
+            foreach (var ev in Events)
+            {
+                var groups = new List<object>(); object g;
+                if (hooks.TryGetValue(ev, out g) && g is object[]) foreach (var grp in (object[])g) if (!IsOurs(grp)) groups.Add(grp);
+                if (connect)
+                {
+                    var hook = new Dictionary<string, object>(); hook["type"] = "command"; hook["command"] = cmd;
+                    var group = new Dictionary<string, object>(); group["hooks"] = new object[] { hook };
+                    groups.Add(group);
+                }
+                if (groups.Count > 0) hooks[ev] = groups.ToArray(); else hooks.Remove(ev);
+            }
+            if (hooks.Count > 0) root["hooks"] = hooks; else root.Remove("hooks");
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            if (File.Exists(path)) File.Copy(path, path + ".pixelpet-backup", true);
+            File.WriteAllText(path, TextTools.Pretty(js.Serialize(root)) + "\n");
+        }
+    }
+
+    static bool IsOurs(object grp)
+    {
+        var d = grp as Dictionary<string, object>; object inner;
+        if (d == null || !d.TryGetValue("hooks", out inner) || !(inner is object[])) return false;
+        foreach (var x in (object[])inner)
+        {
+            var hd = x as Dictionary<string, object>; object c;
+            if (hd != null && hd.TryGetValue("command", out c) && c is string && ((string)c).Contains("--claude-hook")) return true;
+        }
+        return false;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int MessageBox(IntPtr h, string text, string caption, uint type);
 }
 
 // ---------------------------------------------------------------------- clipboard text helpers (pure; covered by --selftest)
@@ -2268,6 +2621,64 @@ static class TextTools
             case "d": case "day": case "days": return 1440;
         }
         return 0;
+    }
+
+    // One string field out of a small JSON object (Claude Code hook payloads). Handles the usual escapes.
+    public static string JsonField(string json, string key)
+    {
+        int i = json.IndexOf("\"" + key + "\"", StringComparison.Ordinal);
+        if (i < 0) return "";
+        i += key.Length + 2;
+        while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
+        if (i >= json.Length || json[i] != ':') return "";
+        i++;
+        while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
+        if (i >= json.Length || json[i] != '"') return "";
+        var sb = new StringBuilder();
+        for (i++; i < json.Length && sb.Length < 1000; i++)
+        {
+            char c = json[i];
+            if (c == '"') return sb.ToString();
+            if (c != '\\' || i + 1 >= json.Length) { sb.Append(c); continue; }
+            char n = json[++i]; int code;
+            if (n == 'n') sb.Append('\n');
+            else if (n == 't') sb.Append('\t');
+            else if (n == 'r') { }
+            else if (n == 'u' && i + 4 < json.Length && int.TryParse(json.Substring(i + 1, 4), NumberStyles.HexNumber, Inv, out code)) { sb.Append((char)code); i += 4; }
+            else sb.Append(n);
+        }
+        return sb.ToString();
+    }
+
+    public static string ProjectName(string cwd)
+    {
+        string t = (cwd ?? "").TrimEnd('\\', '/');
+        int cut = Math.Max(t.LastIndexOf('\\'), t.LastIndexOf('/'));
+        string name = cut >= 0 ? t.Substring(cut + 1) : t;
+        return name.Length > 24 ? name.Substring(0, 24) : name;
+    }
+
+    // Indents compact JSON (2 spaces), leaving string contents alone.
+    public static string Pretty(string json)
+    {
+        var sb = new StringBuilder(); int ind = 0; bool str = false, esc = false;
+        for (int i = 0; i < json.Length; i++)
+        {
+            char c = json[i];
+            if (str) { sb.Append(c); if (esc) esc = false; else if (c == '\\') esc = true; else if (c == '"') str = false; continue; }
+            switch (c)
+            {
+                case '"': str = true; sb.Append(c); break;
+                case '{': case '[':
+                    if (i + 1 < json.Length && (json[i + 1] == '}' || json[i + 1] == ']')) { sb.Append(c).Append(json[i + 1]); i++; break; }
+                    sb.Append(c).Append('\n').Append(' ', ++ind * 2); break;
+                case '}': case ']': sb.Append('\n').Append(' ', --ind * 2).Append(c); break;
+                case ',': sb.Append(",\n").Append(' ', ind * 2); break;
+                case ':': sb.Append(": "); break;
+                default: if (!char.IsWhiteSpace(c)) sb.Append(c); break;
+            }
+        }
+        return sb.ToString().Replace("\\u003c", "<").Replace("\\u003e", ">").Replace("\\u0026", "&").Replace("\\u0027", "'");
     }
 
     // What the foreground window is, from its process name, title and URL. "" = no idea.

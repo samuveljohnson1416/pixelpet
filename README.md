@@ -19,7 +19,10 @@ PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no de
 - It climbs the screen edges and walks upside-down along the top.
 - It takes naps and follows your cursor with its eyes.
 - **Curious visits:** every few minutes it hops onto (or walks under) the window you're using and reacts to what it is: code editors, terminals, GitHub, docs, mail, chat, video, music, games, shopping and more. Sometimes it asks "What are you up to?". Click it to answer from a quick menu (Working, Studying, Taking a break, Just browsing, Leave me alone). If you say you're working it gets quieter, and it nudges you if you drift to video or social media. It stays silent during meetings and focus sessions. It only uses the app name, window title and URL it already reads; nothing is captured or sent anywhere (`curious = no` turns it off).
-- Clicking it counts as a pat and gives XP; closing a doomscroll tab and finishing reminders give XP too. Your level is saved.
+- Clicking it counts as a pat and gives XP; closing a doomscroll tab, finishing reminders and Claude Code finishing a task give XP too. Your level is saved.
+- **It evolves as it levels up:** Hatchling, then Companion at level 5 (a sprout), Scout at 10 (an explorer cap), Hero at 20 (a headband) and Legend at 35 (a crown). Hats step aside when it's wearing headphones.
+- **14 achievements and a stats card.** **Stats & achievements** in the menu shows tabs closed, pats, focus sessions, reminders done, clipboard actions, Claude tasks and your daily streak, plus which achievements you've unlocked.
+- **Stretch nudge:** after 90 minutes of non-stop activity (`stretch = 90`) it suggests a break. A 5-minute pause resets the clock, and it stays quiet during focus sessions, which have their own breaks.
 - When you type, it pulls out a laptop and taps along. It spots typing without a keyboard hook and never records which keys you press (see [Privacy](#privacy)).
 - Press Enter and it throws a rope at your text caret, or at the mouse pointer if the app doesn't expose a caret.
 - On a laptop it reacts to the charger: a spark and a charging battery when you plug in, a note when you unplug, and warnings at 20 % and 10 % battery. Desktops without a battery see none of this.
@@ -42,6 +45,11 @@ PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no de
 - When a reminder is due, the pet holds up a sign and beeps. If the pet is hidden, you get a tray notification. Click the pet to mark it done. Right-click to snooze it (5 min, 15 min, 1 hour or tomorrow at 9:00).
 - `every` reminders skip while you've been away for more than 5 minutes. During a focus session they wait for your break.
 - No reminder pops up while a fullscreen app, game or presentation is running. They wait until it ends.
+
+**Claude Code companion**
+- Choose **Claude Code > Connect Claude Code...** in the menu once. After you confirm, it adds four hooks (`UserPromptSubmit`, `Notification`, `Stop`, `SessionEnd`) to `~/.claude/settings.json`, backing the file up first to `settings.json.pixelpet-backup`. It never touches other hooks, and **Disconnect** removes only its own entries.
+- While Claude works, a `Claude working 3:12` tag shows over the pet. When Claude needs your permission or is waiting for you, the pet runs to your cursor, waves and beeps. When a task finishes it cheers and earns 10 XP. If the pet is hidden, you get tray notifications instead. The menu lists each session with its project folder and state.
+- The hook is `PixelPetFocus.exe --claude-hook`. It reads the event from Claude Code, hands it to the running pet through a window message, prints nothing and exits within a moment. If the pet isn't running it simply does nothing.
 
 **Settings**
 - **Settings...** in the menu opens a small native window: add, edit, reorder or remove site rules, edit the never-touch list, and flip every toggle. Launching the exe a second time also opens it.
@@ -103,6 +111,10 @@ YouTube         | 240 | youtube.com/watch, - youtube
 | `clipboard` | `yes` | Clipboard helper |
 | `hotkey` | `yes` | Ctrl+Alt+R (restart to apply) |
 | `audio` | `yes` | Headphones and music/class reactions |
+| `climb` | `yes` | Climb the screen edges |
+| `curious` | `yes` | Visit your window, comment, ask what you're doing |
+| `claude` | `yes` | React to Claude Code (after connecting it from the menu) |
+| `stretch` | `90` | Minutes of non-stop activity before a stretch nudge (`0` = off) |
 | `size` | `1` | Pet size, 0.5 to 4 (restart to apply) |
 | `focus` / `break` | `25` / `5` | Focus timer minutes |
 
@@ -130,7 +142,7 @@ build.cmd
 
 This produces `PixelPetFocus.exe` in the repo root. The code is a single C# 5 file, `src/PixelPetFocus.cs`. `app.ico` is committed. If you delete it, `build.cmd` regenerates it with `src/make_icon.py` (standard-library Python 3).
 
-Self-test (rule matching, time parsing, secret detection, math, link cleaning, reminder parsing). The exit code is the number of failed checks, so `0` means everything passed:
+Self-test (rule matching, time parsing, secret detection, math, link cleaning, reminder parsing, activity detection, Claude hook payloads, ranks). The exit code is the number of failed checks, so `0` means everything passed:
 
 ```powershell
 (Start-Process .\PixelPetFocus.exe -ArgumentList '--selftest' -Wait -PassThru).ExitCode
@@ -144,7 +156,8 @@ GitHub Actions builds every push the same way, runs the self-test and attaches t
 - **What it looks at:** the foreground window's title and process name, and the address bar in the browsers listed above. It checks these once a second in memory, only to match your rules. For audio it reads device names, output levels and the titles of the windows playing sound. It never reads the sound itself.
 - **No keylogging.** There's no keyboard hook. To detect typing it checks that new input arrived, that the mouse didn't move and that some text key is held down right now. All that feeds is an "is typing" level. It never records or stores which keys you press. The Enter rope only checks whether Enter is down.
 - **Clipboard:** it only looks at text copies of up to 2,000 characters. It skips anything marked private by password managers or clipboard-history exclusions, anything that looks like a key or token (`sk-`, `ghp_`, `github_pat_`, `AKIA`, `xox`, JWTs, PEM blocks), 4 to 8 digit codes, and single words that mix letters, digits and symbols like a password. Clipboard text stays in memory and is never written to disk. The one exception is when you pick a **Remind me** option: then the reminder's short message is saved to `reminders.txt`.
-- **What it writes:** `rules.txt`, `reminders.txt` and `progress.txt` (your level and XP) in `%APPDATA%\PixelPet Focus`, plus the Run registry value if you tick **Start with Windows**.
+- **Claude Code:** the hook passes only the event name, the session id, the project folder and Claude's notification text to the pet. It sends them through a local window message, and nothing leaves your PC. `~/.claude/settings.json` is changed only when you click **Connect** or **Disconnect**. That runs as a separate short-lived process, so the pet itself never loads a JSON library.
+- **What it writes:** `rules.txt`, `reminders.txt` and `progress.txt` (level, XP, counters, streak and achievements) in `%APPDATA%\PixelPet Focus`, plus the Run registry value if you tick **Start with Windows**.
 
 ## Resource use
 
@@ -153,6 +166,8 @@ Measured on a Windows 11 laptop: **3-5 MB private working set** and **about 0-1 
 ## Credits
 
 PixelPet Focus is a native rewrite inspired by [BadKat / FocusCat](https://github.com/X-DIABLO-X/badkat) by X-DIABLO-X (MIT licensed). The default rule set and the approach of matching URL, title and process with a grace time per site come from that project. Its license notice is included in [LICENSE](LICENSE).
+
+The Claude Code status, evolution stages, achievements and break reminder were inspired by [AgentPet](https://github.com/ntd4996/agentpet) by Nguyễn Thành Đạt (MIT licensed). The features were reimplemented from scratch; no AgentPet code is included.
 
 The pixel pet's look is a fan tribute to the Claude Code mascot. This is an unofficial personal project and is not affiliated with or endorsed by Anthropic.
 

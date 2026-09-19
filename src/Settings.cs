@@ -1,4 +1,4 @@
-// The settings window: native Win32 controls (no WinForms), on its own thread so the pet keeps
+﻿// The settings window: native Win32 controls (no WinForms), on its own thread so the pet keeps
 // animating while it is open. Saving writes the same rules.txt the file format has always used,
 // so hand-editing still works and the watcher's hot-reload still applies changes.
 using System;
@@ -43,7 +43,7 @@ static class Settings
         var o = new Cfg();
         o.Countdown = c.Countdown; o.Snooze = c.Snooze; o.Focus = c.Focus; o.Break = c.Break;
         o.Nag = c.Nag; o.Wander = c.Wander; o.Sleepy = c.Sleepy; o.Typing = c.Typing;
-        o.EnterRope = c.EnterRope; o.Climb = c.Climb; o.Audio = c.Audio; o.Clipboard = c.Clipboard; o.Hotkey = c.Hotkey; o.Curious = c.Curious; o.Size = c.Size;
+        o.EnterRope = c.EnterRope; o.Climb = c.Climb; o.Audio = c.Audio; o.Clipboard = c.Clipboard; o.Hotkey = c.Hotkey; o.Curious = c.Curious; o.Claude = c.Claude; o.Stretch = c.Stretch; o.Size = c.Size;
         o.Never = (string[])c.Never.Clone();
         o.Rules = c.Rules;
         return o;
