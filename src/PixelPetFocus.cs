@@ -18,7 +18,7 @@ class Cfg
 {
     public int Countdown = 3, Snooze = 5, Focus = 25, Break = 5, Stretch = 90;
     public bool Claude = true;
-    public bool Nag, Wander = true, Sleepy = true, Typing = true, EnterRope = true, Climb = true, Audio = true, Clipboard = true, Hotkey = true, Curious = true;
+    public bool Nag, Wander = true, Sleepy = true, Typing = true, EnterRope = true, Climb = true, Audio = true, Clipboard = true, Hotkey = true, Curious = true, WebTravel = true;
     public double Size = 1;
     public string[] Never = new string[0];
     public Rule[] Rules = new Rule[0];
@@ -45,6 +45,7 @@ sleepy = yes       # take naps
 typing = yes       # pulls out a laptop while you type (never records keys)
 enterrope = yes    # throws a rope at your caret/cursor when you press Enter
 climb = yes        # climbs the screen edges and walks upside-down along the top
+webtravel = yes    # Ctrl+Alt+G shoots a web to the cursor and swings the pet there (restart to apply)
 clipboard = yes    # notices useful copied text (times, links, sums); ignores passwords
 hotkey = yes       # Ctrl+Alt+R opens the clipboard menu (restart to apply)
 curious = yes      # visits the window you're using, comments on it, asks what you're doing
@@ -128,6 +129,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                     case "typing": c.Typing = yes; break;
                     case "enterrope": c.EnterRope = yes; break;
                     case "climb": c.Climb = yes; break;
+                    case "webtravel": c.WebTravel = yes; break;
                     case "clipboard": c.Clipboard = yes; break;
                     case "hotkey": c.Hotkey = yes; break;
                     case "curious": c.Curious = yes; break;
@@ -185,7 +187,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static int watchX;
 
     // ------------------------------------------------------------------ pet state (UI thread only)
-    const int SIT = 0, WALK = 1, SLEEP = 2, AIR = 3, HELD = 4, RUN = 5, GLARE = 6, SWIPE = 7, TYPE = 8, CLIMB = 9, HANG = 10;
+    const int SIT = 0, WALK = 1, SLEEP = 2, AIR = 3, HELD = 4, RUN = 5, GLARE = 6, SWIPE = 7, TYPE = 8, CLIMB = 9, HANG = 10, SWING = 11;
     static IntPtr hwnd, mdc;
     static int W, H, U; static double S;
     static RECT wa;
@@ -204,6 +206,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static int focusPhase; static DateTime focusEnd;   // 0 off, 1 focus, 2 break
     static double lapOpen, lastKeyAgo = 99, keyBurst, codeT; static uint lastInput; static POINT lastCur;
     static IntPtr ropeWnd; static double ropeT = -1, ropeTx, ropeTy, ropeCool; static bool enterDown;
+    // web travel: a quadratic-bezier swing from wherever the pet is to the cursor, anchored above the midpoint
+    static double swingSX, swingSY, swingAX, swingAY, swingTX, swingTY, webCool; static bool webShown;
+    static POINT menuOpenPt;
     static POINT[] ropeStar; static int ropeW, ropeH;
     // written by the audio thread, read by the UI thread
     static volatile bool headphones; static volatile int audioKind; static volatile float audioPeak; static volatile string audioDevice = "";
@@ -231,6 +236,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         "finish a reminder", "use 10 clipboard actions", "Claude Code finishes a task", "Claude Code finishes 100 tasks",
         "3-day streak", "7-day streak", "be active after midnight", "reach level 5", "reach level 20", "reach level 35" };                        // your quick-reply answer and how long it holds
     static readonly string[] Codes = { "{ }", "01", ";", "</>", "#", "=>", "()" };
+    static readonly string[] LandingLines = { "Ta-da!", "Stuck the landing!", "Whee, made it!", "Web-slinging pro!", "Boop!" };
     static double secAcc;
 
     const int CUP = 0xC8D25A, CUPDARK = 0x8C9637, PAPER = 0xF0F5F5, INK = 0xB4AAA0;
@@ -298,6 +304,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         fmtIgnore = RegisterClipboardFormat("Clipboard Viewer Ignore");
         AddClipboardFormatListener(hwnd);
         if (cfg.Hotkey && !RegisterHotKey(hwnd, 1, 0x4003, 0x52)) Say("Ctrl+Alt+R is taken by another app.", 3);   // CTRL|ALT|NOREPEAT, R
+        if (cfg.WebTravel && !RegisterHotKey(hwnd, 2, 0x4003, 0x47)) Say("Ctrl+Alt+G is taken by another app.", 3);   // CTRL|ALT|NOREPEAT, G
         lastTick = Environment.TickCount;
         SetTimer(hwnd, (IntPtr)1, 33, IntPtr.Zero);
         var t = new Thread(Watch); t.IsBackground = true; t.Start();
@@ -342,7 +349,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 if (e == 0x0205) Menu(); else if (e == 0x0203) ToggleHidden();
                 return IntPtr.Zero;
             case 0x031D: clipRetry = 3; return IntPtr.Zero;              // WM_CLIPBOARDUPDATE: read on the next tick
-            case 0x0312: ClipMenu(); return IntPtr.Zero;                 // WM_HOTKEY
+            case 0x0312: if (w.ToInt32() == 2) { POINT hp; GetCursorPos(out hp); StartSwing(hp.X); } else ClipMenu(); return IntPtr.Zero;   // WM_HOTKEY
             case 0x0002: if (h == hwnd) PostQuitMessage(0); return IntPtr.Zero;   // WM_DESTROY
         }
         return DefWindowProc(h, m, w, l);
@@ -392,7 +399,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         POINT c; GetCursorPos(out c);
         DetectTyping(c, dt);
         bool enter = (GetAsyncKeyState(0x0D) & 0x8000) != 0;
-        ropeCool -= dt;
+        ropeCool -= dt; webCool -= dt;
         if (enter && !enterDown && cfg.EnterRope && !hidden && alert == null && ropeT < 0 && ropeCool <= 0
             && (state == SIT || state == WALK || state == SLEEP || state == TYPE)) ThrowRope();
         enterDown = enter;
@@ -456,6 +463,13 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 if (stateT >= stateDur) SetState(SIT, 2);
                 break;
             case AIR: Physics(dt); break;
+            case SWING:
+                {
+                    double u = Clamp(stateT / Math.Max(0.01, stateDur), 0, 1);
+                    SwingPos(swingSX, swingSY, swingAX, swingAY, swingTX, swingTY, u, out x, out y);
+                    if (u >= 1) { x = swingTX; y = swingTY; Land(true); }
+                }
+                break;
             case TYPE:
                 if (lastKeyAgo > 2.5 && lapOpen <= 0) SetState(SIT, Rand(1.5, 3));
                 else if (lastKeyAgo < 0.4 && lapOpen >= 1 && (codeT -= dt) <= 0)
@@ -512,7 +526,65 @@ YouTube         | 240 | youtube.com/watch, - youtube
         wl = Clamp(wl, wa.L, wa.R - W);
         if (wl != winLeft || wt != winTop) { SetWindowPos(hwnd, IntPtr.Zero, wl, wt, 0, 0, 0x15); winLeft = wl; winTop = wt; }
         if (ropeT >= 0) DrawRope();
+        else if (state == SWING) DrawWeb();
+        else if (webShown) { ShowWindow(ropeWnd, 0); webShown = false; }
         Render();
+    }
+
+    // Web travel: shoot a strand to wherever the cursor is and swing there, on a big arc anchored
+    // above the midpoint, so it reads as real travel rather than a teleport. Works from any state the
+    // pet can safely leave unattended (walking, sitting, napping, typing, or hanging/climbing a wall).
+    static void StartSwing(int cursorX)
+    {
+        if (!cfg.WebTravel || alert != null || sign != null || held || hidden || webCool > 0) return;
+        if (state != SIT && state != WALK && state != SLEEP && state != TYPE && state != HANG && state != CLIMB) return;
+        double tx = Clamp((double)cursorX, wa.L + 8 * U, wa.R - 8 * U);
+        double dist = Math.Abs(tx - x);
+        if (dist < 40 * S) { Say("Already here!", 1.2); return; }
+        orient = 0; climbNext = 0; hangSleep = false; climbAfterWalk = false; perch = IntPtr.Zero; ignorePerch = IntPtr.Zero;
+        curiousLine = null; askT = 0; bubbleT = 0;
+        swingSX = x; swingSY = y; swingTX = tx; swingTY = wa.B;
+        double baseline = Math.Min(swingSY, swingTY);
+        double rise = Clamp(dist * 0.45, 80 * S, Math.Max(40 * S, baseline - (wa.T + 14 * U)));
+        swingAX = swingSX + (swingTX - swingSX) * 0.5;
+        swingAY = baseline - rise;
+        facing = swingTX >= swingSX ? 1 : -1;
+        SetState(SWING, Clamp(dist / (520 * S), 0.55, 1.7));
+    }
+
+    // A single quadratic bezier from start to target through an overhead control point: pure and
+    // testable on its own (u=0 -> start, u=1 -> target, u=0.5 rises toward the anchor in between).
+    static void SwingPos(double sx0, double sy0, double ax, double ay, double tx, double ty, double u, out double px, out double py)
+    {
+        double e = u * u * (3 - 2 * u);                                        // ease in/out like a real swing
+        double a1 = (1 - e) * (1 - e), b1 = 2 * e * (1 - e), c1 = e * e;
+        px = a1 * sx0 + b1 * ax + c1 * tx;
+        py = a1 * sy0 + b1 * ay + c1 * ty;
+    }
+
+    // The strand itself: a short taut quad from the raised paw to the fixed anchor point, redrawn
+    // every frame like the Enter-rope but without its slack/snap-back timing (it stays taut throughout).
+    static void DrawWeb()
+    {
+        webShown = true;
+        double hx = x + facing * 6 * U, hy = y - 9 * U, ax = swingAX, ay = swingAY;
+        double dist = Math.Sqrt((ax - hx) * (ax - hx) + (ay - hy) * (ay - hy));
+        if (dist < 3) { ShowWindow(ropeWnd, 0); webShown = false; return; }
+        double th = Math.Max(2, U * 0.4), nx = -(ay - hy) / dist * th / 2, ny = (ax - hx) / dist * th / 2;
+        var pts = new POINT[4];
+        pts[0].X = (int)(hx + nx); pts[0].Y = (int)(hy + ny);
+        pts[1].X = (int)(ax + nx); pts[1].Y = (int)(ay + ny);
+        pts[2].X = (int)(ax - nx); pts[2].Y = (int)(ay - ny);
+        pts[3].X = (int)(hx - nx); pts[3].Y = (int)(hy - ny);
+        int minX = pts[0].X, minY = pts[0].Y, maxX = pts[0].X, maxY = pts[0].Y;
+        for (int i = 1; i < 4; i++) { minX = Math.Min(minX, pts[i].X); maxX = Math.Max(maxX, pts[i].X); minY = Math.Min(minY, pts[i].Y); maxY = Math.Max(maxY, pts[i].Y); }
+        int ox = minX - 2, oy = minY - 2;
+        ropeW = maxX - ox + 3; ropeH = maxY - oy + 3;
+        for (int i = 0; i < 4; i++) { pts[i].X -= ox; pts[i].Y -= oy; }
+        ropeStar = null;
+        SetWindowRgn(ropeWnd, CreatePolygonRgn(pts, 4, 2), false);              // the system owns the region now
+        SetWindowPos(ropeWnd, (IntPtr)(-1), ox, oy, ropeW, ropeH, 0x10 | 0x40); // NOACTIVATE | SHOWWINDOW
+        PaintRope();
     }
 
     // Enter: lasso the spot you just typed at. The text caret when the app exposes one, else the mouse.
@@ -1084,8 +1156,21 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (y >= wa.B) { y = wa.B; perch = IntPtr.Zero; ignorePerch = IntPtr.Zero; Land(); }
     }
 
-    static void Land()
+    static void Land(bool webby = false)
     {
+        if (webby)
+        {
+            // a cute, deliberate landing rather than the usual fall: a solid squash, a happy line, a
+            // scatter of dust and a couple of hearts, then a short cooldown before another swing.
+            sqK = 0.85; sqT = 0.25; vx = 0; vy = 0; webCool = 1.0; joyT = 1.2;
+            Say(LandingLines[rnd.Next(LandingLines.Length)], 1.8);
+            Hearts(2);
+            for (int i = 0; i < 5; i++)
+                parts.Add(new Part { X = x + Rand(-9, 9) * U, Y = y - Rand(0, 1.5) * U, VY = -Rand(18, 40) * S, Life = Rand(0.5, 0.9), Text = "\u00B7" });
+            if (alert != null) { if (perch != IntPtr.Zero) HopDown(); else SetState(RUN, 0); }
+            else SetState(SIT, Rand(1.5, 3));
+            return;
+        }
         sqK = Math.Min(1, vy / (1400 * S)); sqT = 0.25; vx = 0; vy = 0;
         if (alert != null) { if (perch != IntPtr.Zero) HopDown(); else SetState(RUN, 0); }
         else SetState(SIT, Rand(1.5, 4));
@@ -1291,6 +1376,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         AppendMenu(m, patrol ? CHECK : 0, (UIntPtr)12, "On patrol");
         AppendMenu(m, 0, (UIntPtr)13, state == SLEEP ? "Wake up" : "Nap now");
         if (cfg.Climb) AppendMenu(m, 0, (UIntPtr)26, orient != 0 ? "Come down" : "Climb the wall");
+        if (cfg.WebTravel) AppendMenu(m, 0, (UIntPtr)27, "Web-swing here");
         AppendMenu(m, SEP, UIntPtr.Zero, null);
         IntPtr clip = CreatePopupMenu();
         ReadClipboard(false);
@@ -1343,6 +1429,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 else if (perch != IntPtr.Zero) HopDown();
                 else if (state == SIT || state == WALK || state == SLEEP) { GoClimb(); Say("To the wall!", 1.5); }
                 break;
+            case 27: StartSwing(menuOpenPt.X); break;
             case 21: AutoStart(!auto); break;
             case 22: ToggleHidden(); break;
             case 23: DestroyWindow(hwnd); break;
@@ -1368,6 +1455,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         prev = GetForegroundWindow();
         SetForegroundWindow(hwnd);                                              // required for the menu to dismiss properly
         POINT c; GetCursorPos(out c);
+        menuOpenPt = c;                                                          // before the mouse moves onto the menu itself
         int cmd = TrackPopupMenu(m, 0x100 | 0x2 | 0x20, c.X, c.Y, 0, hwnd, IntPtr.Zero);
         DestroyMenu(m);                                                          // also destroys submenus
         return cmd;
@@ -2014,14 +2102,14 @@ YouTube         | 240 | youtube.com/watch, - youtube
 
         bool sleeping = state == SLEEP || hangSleep;
         bool angry = angryT > 0 || state == RUN || state == GLARE || state == SWIPE;
-        bool joy = (joyT > 0 || (vibing && state == SIT)) && !angry;
+        bool joy = (joyT > 0 || (vibing && state == SIT) || state == SWING) && !angry;
         int body = angry ? ANGRY : onAC && chargeT > 2.3 && (int)(animT * 10) % 2 == 0 ? STAR : CORAL;   // zap flash on plug-in
         bool typing = state == TYPE;
         int dy = state == SLEEP || typing ? 2 : 0;
 
         if (dy == 0)
         {
-            bool walking = state == WALK || state == RUN || state == CLIMB;
+            bool walking = state == WALK || state == RUN || state == CLIMB || state == SWING;
             int phase = walking ? (int)(animT * (state == RUN ? 14 : 8)) % 2 : -1;
             for (int i = 0; i < 4; i++) Px(Legs[i], 7, 1, state == HELD ? 3 : (i % 2 == phase ? 1 : 2), body);
         }
@@ -2029,8 +2117,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
 
         bool up = joy || state == HELD || (sign != null && state != TYPE);   // holding up the reminder sign
         bool swipeRaised = state == SWIPE && stateT < 0.25, swipeStrike = state == SWIPE && stateT >= 0.25;
-        bool roping = ropeT >= 0;
-        bool leftBusy = facing < 0 && (swipeRaised || swipeStrike || roping), rightBusy = facing > 0 && (swipeRaised || swipeStrike || roping);
+        bool roping = ropeT >= 0; bool swinging = state == SWING;
+        bool leftBusy = facing < 0 && (swipeRaised || swipeStrike || roping || swinging), rightBusy = facing > 0 && (swipeRaised || swipeStrike || roping || swinging);
         if (typing && lapOpen > 0)
         {
             double off = (1 - lapOpen) * 3.5;                                   // laptop rises out of the ground
@@ -2058,6 +2146,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         }
         if (swipeRaised) Px(facing > 0 ? 12 : 0, 0, 2, 3, body);
         if (roping) Px(facing > 0 ? 12 : 0, dy, 2, 3, body);
+        if (swinging) Px(facing > 0 ? 12 : 0, dy, 2, 3, body);
         if (swipeStrike) Px(facing > 0 ? 12 : -2, 3, 4, 2, body);
 
         if (sleeping || (blinkOn > 0 && !angry && !joy)) { Px(3.8, 3 + dy, 1.4, 0.5, EYE); Px(8.8, 3 + dy, 1.4, 0.5, EYE); }
@@ -2204,6 +2293,14 @@ YouTube         | 240 | youtube.com/watch, - youtube
         ok(TextTools.Pretty("{\"a\":[1,{\"b\":\"x,y\"}],\"c\":{}}") == "{\n  \"a\": [\n    1,\n    {\n      \"b\": \"x,y\"\n    }\n  ],\n  \"c\": {}\n}");
         ok(Rank(1) == "Hatchling" && Rank(5) == "Companion" && Rank(19) == "Scout" && Rank(35) == "Legend" && NextRank(35) == 0);
         ok(AchNames.Length == AchHow.Length && AchNames.Length <= 31);
+
+        double px, py;
+        SwingPos(0, 100, 50, 0, 200, 100, 0, out px, out py);
+        ok(px == 0 && py == 100);                                              // u=0: exactly the start
+        SwingPos(0, 100, 50, 0, 200, 100, 1, out px, out py);
+        ok(px == 200 && py == 100);                                            // u=1: exactly the target
+        SwingPos(0, 100, 50, 0, 200, 100, 0.5, out px, out py);
+        ok(Math.Abs(px - 75) < 0.001 && py < 100);                             // midpoint: pulled toward the overhead anchor (bezier, not a straight line)
         return fails;
     }
 

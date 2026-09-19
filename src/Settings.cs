@@ -14,7 +14,7 @@ static class Settings
               ID_SIZE = 111, ID_FOCUS = 112, ID_BREAK = 113, ID_AUTOSTART = 114, ID_LIST = 115,
               ID_RLABEL = 116, ID_RSECS = 117, ID_RPATS = 118, ID_ADD = 119, ID_APPLY = 120,
               ID_DEL = 121, ID_DEFAULTS = 122, ID_NEVER = 123, ID_SAVE = 124, ID_CLOSEBTN = 125,
-              ID_OPENTXT = 126, ID_UP = 127, ID_DOWN = 128, ID_CLIP = 129, ID_HOTKEY = 130, ID_CLIMB = 131;
+              ID_OPENTXT = 126, ID_UP = 127, ID_DOWN = 128, ID_CLIP = 129, ID_HOTKEY = 130, ID_CLIMB = 131, ID_WEB = 132;
 
     static readonly double[] Sizes = { 0.75, 1, 1.25, 1.5, 2 };
     static readonly string[] SizeNames = { "0.75x", "1x", "1.25x", "1.5x", "2x" };
@@ -43,7 +43,7 @@ static class Settings
         var o = new Cfg();
         o.Countdown = c.Countdown; o.Snooze = c.Snooze; o.Focus = c.Focus; o.Break = c.Break;
         o.Nag = c.Nag; o.Wander = c.Wander; o.Sleepy = c.Sleepy; o.Typing = c.Typing;
-        o.EnterRope = c.EnterRope; o.Climb = c.Climb; o.Audio = c.Audio; o.Clipboard = c.Clipboard; o.Hotkey = c.Hotkey; o.Curious = c.Curious; o.Claude = c.Claude; o.Stretch = c.Stretch; o.Size = c.Size;
+        o.EnterRope = c.EnterRope; o.Climb = c.Climb; o.WebTravel = c.WebTravel; o.Audio = c.Audio; o.Clipboard = c.Clipboard; o.Hotkey = c.Hotkey; o.Curious = c.Curious; o.Claude = c.Claude; o.Stretch = c.Stretch; o.Size = c.Size;
         o.Never = (string[])c.Never.Clone();
         o.Rules = c.Rules;
         return o;
@@ -69,7 +69,7 @@ static class Settings
             classReady = true;
         }
 
-        int w = D(676), h = D(672);
+        int w = D(676), h = D(696);
         var scr = new RECT(); SystemParametersInfo(0x30, 0, ref scr, 0);
         int px = (scr.L + scr.R - w) / 2, py = (scr.T + scr.B - h) / 2;
         // WS_OVERLAPPED|CAPTION|SYSMENU|MINIMIZEBOX, sized so the client area fits the layout
@@ -116,27 +116,28 @@ static class Settings
         Label("Snooze when you click it (min)", 24, 112, 200);
         Edit(230, 110, 60, 22, 0x2000, ID_SNOOZE);
 
-        Group("The pet", 12, 162, 312, 204);
+        Group("The pet", 12, 162, 312, 228);
         Check("Wander around the screen", 24, 182, 280, ID_WANDER);
         Check("Take naps", 24, 206, 280, ID_SLEEPY);
         Check("Pull out a laptop while you type", 24, 230, 280, ID_TYPING);
         Check("Throw a rope when you press Enter", 24, 254, 280, ID_ROPE);
         Check("Headphones, music and class reactions", 24, 278, 290, ID_AUDIO);
         Check("Climb up the screen edges", 24, 302, 280, ID_CLIMB);
-        Label("Size", 24, 334, 40);
-        Mk("COMBOBOX", "", 0x10003, 66, 332, 100, 200, ID_SIZE);                    // CBS_DROPDOWNLIST|WS_TABSTOP
-        Label("(applies on restart)", 174, 334, 140);
+        Check("Ctrl+Alt+G web-swings to the cursor", 24, 326, 290, ID_WEB);
+        Label("Size", 24, 358, 40);
+        Mk("COMBOBOX", "", 0x10003, 66, 356, 100, 200, ID_SIZE);                    // CBS_DROPDOWNLIST|WS_TABSTOP
+        Label("(applies on restart)", 174, 358, 140);
 
-        Group("Focus timer", 12, 370, 312, 92);
-        Label("Focus session (min)", 24, 392, 140);
-        Edit(170, 390, 60, 22, 0x2000, ID_FOCUS);
-        Label("Break (min)", 24, 422, 140);
-        Edit(170, 420, 60, 22, 0x2000, ID_BREAK);
+        Group("Focus timer", 12, 394, 312, 92);
+        Label("Focus session (min)", 24, 416, 140);
+        Edit(170, 414, 60, 22, 0x2000, ID_FOCUS);
+        Label("Break (min)", 24, 446, 140);
+        Edit(170, 444, 60, 22, 0x2000, ID_BREAK);
 
-        Group("Clipboard && Windows", 12, 470, 312, 106);
-        Check("React to copied text (links, sums, reminders)", 24, 490, 290, ID_CLIP);
-        Check("Ctrl+Alt+R opens the clipboard menu", 24, 514, 290, ID_HOTKEY);
-        Check("Start with Windows", 24, 538, 280, ID_AUTOSTART);
+        Group("Clipboard && Windows", 12, 494, 312, 106);
+        Check("React to copied text (links, sums, reminders)", 24, 514, 290, ID_CLIP);
+        Check("Ctrl+Alt+R opens the clipboard menu", 24, 538, 290, ID_HOTKEY);
+        Check("Start with Windows", 24, 562, 280, ID_AUTOSTART);
 
         Group("What counts as doomscrolling", 334, 6, 328, 450);
         list = Mk("SysListView32", "", 0x1000D, 344, 26, 308, 172, ID_LIST, 0x200); // WS_TABSTOP|LVS_REPORT|SINGLESEL|SHOWSELALWAYS
@@ -159,10 +160,10 @@ static class Settings
         Group("Never touch (one phrase per line)", 334, 464, 328, 122);
         Edit(344, 486, 308, 88, 0x4 | 0x40 | 0x1000 | 0x200000, ID_NEVER);          // MULTILINE|AUTOVSCROLL|WANTRETURN|WS_VSCROLL
 
-        Push("Open rules.txt", 12, 596, 120, ID_OPENTXT);
-        status = Mk("STATIC", "", 0, 140, 602, 290, 18, 0);
-        Push("Save", 452, 594, 96, ID_SAVE);
-        Push("Close", 556, 594, 96, ID_CLOSEBTN);
+        Push("Open rules.txt", 12, 620, 120, ID_OPENTXT);
+        status = Mk("STATIC", "", 0, 140, 626, 290, 18, 0);
+        Push("Save", 452, 618, 96, ID_SAVE);
+        Push("Close", 556, 618, 96, ID_CLOSEBTN);
 
         for (int i = 0; i < SizeNames.Length; i++) SendMessageStr(ctl[ID_SIZE], 0x0143, IntPtr.Zero, SizeNames[i]);   // CB_ADDSTRING
     }
@@ -200,7 +201,7 @@ static class Settings
         SetText(ID_COUNT, cfg.Countdown.ToString()); SetText(ID_SNOOZE, cfg.Snooze.ToString());
         SetCheck(ID_WANDER, cfg.Wander); SetCheck(ID_SLEEPY, cfg.Sleepy);
         SetCheck(ID_TYPING, cfg.Typing); SetCheck(ID_ROPE, cfg.EnterRope); SetCheck(ID_AUDIO, cfg.Audio);
-        SetCheck(ID_CLIP, cfg.Clipboard); SetCheck(ID_HOTKEY, cfg.Hotkey); SetCheck(ID_CLIMB, cfg.Climb);
+        SetCheck(ID_CLIP, cfg.Clipboard); SetCheck(ID_HOTKEY, cfg.Hotkey); SetCheck(ID_CLIMB, cfg.Climb); SetCheck(ID_WEB, cfg.WebTravel);
         int pick = 1;
         for (int i = 0; i < Sizes.Length; i++) if (Math.Abs(Sizes[i] - cfg.Size) < 0.01) pick = i;
         SendMessage(ctl[ID_SIZE], 0x014E, (IntPtr)pick, IntPtr.Zero);                   // CB_SETCURSEL
@@ -277,7 +278,7 @@ static class Settings
         cfg.Snooze = GetNum(ID_SNOOZE, 1, 600, 5);
         cfg.Wander = GetCheck(ID_WANDER); cfg.Sleepy = GetCheck(ID_SLEEPY);
         cfg.Typing = GetCheck(ID_TYPING); cfg.EnterRope = GetCheck(ID_ROPE); cfg.Audio = GetCheck(ID_AUDIO);
-        cfg.Clipboard = GetCheck(ID_CLIP); cfg.Hotkey = GetCheck(ID_HOTKEY); cfg.Climb = GetCheck(ID_CLIMB);
+        cfg.Clipboard = GetCheck(ID_CLIP); cfg.Hotkey = GetCheck(ID_HOTKEY); cfg.Climb = GetCheck(ID_CLIMB); cfg.WebTravel = GetCheck(ID_WEB);
         cfg.Focus = GetNum(ID_FOCUS, 1, 600, 25); cfg.Break = GetNum(ID_BREAK, 1, 600, 5);
         int sel = SendMessage(ctl[ID_SIZE], 0x0147, IntPtr.Zero, IntPtr.Zero).ToInt32();   // CB_GETCURSEL
         cfg.Size = sel >= 0 && sel < Sizes.Length ? Sizes[sel] : 1;
@@ -311,6 +312,7 @@ static class Settings
         sb.Append("typing = ").Append(YN(c.Typing)).Append("\r\n");
         sb.Append("enterrope = ").Append(YN(c.EnterRope)).Append("\r\n");
         sb.Append("climb = ").Append(YN(c.Climb)).Append("\r\n");
+        sb.Append("webtravel = ").Append(YN(c.WebTravel)).Append("\r\n");
         sb.Append("audio = ").Append(YN(c.Audio)).Append("\r\n");
         sb.Append("clipboard = ").Append(YN(c.Clipboard)).Append("\r\n");
         sb.Append("hotkey = ").Append(YN(c.Hotkey)).Append("\r\n");

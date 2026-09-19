@@ -17,6 +17,7 @@ PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no de
 - It walks along the taskbar, jumps onto the title bar of the window you're using and rides along when you move that window. It falls off when the window is minimised, maximised, closed or covered.
 - You can drag it and throw it. It falls with gravity, bounces off the screen edges and can land on windows.
 - It climbs the screen edges and walks upside-down along the top.
+- **Web-swing:** press **Ctrl+Alt+G** (or pick **Web-swing here** in the menu) and it shoots a web to your mouse pointer, swings over on an arc, and lands with a little squash, a puff of dust and hearts.
 - It takes naps and follows your cursor with its eyes.
 - **Curious visits:** every few minutes it hops onto (or walks under) the window you're using and reacts to what it is: code editors, terminals, GitHub, docs, mail, chat, video, music, games, shopping and more. Sometimes it asks "What are you up to?". Click it to answer from a quick menu (Working, Studying, Taking a break, Just browsing, Leave me alone). If you say you're working it gets quieter, and it nudges you if you drift to video or social media. It stays silent during meetings and focus sessions. It only uses the app name, window title and URL it already reads; nothing is captured or sent anywhere (`curious = no` turns it off).
 - Clicking it counts as a pat and gives XP; closing a doomscroll tab, finishing reminders and Claude Code finishing a task give XP too. Your level is saved.
@@ -77,6 +78,7 @@ Settings and progress are saved in `%APPDATA%\PixelPet Focus`. To have it start 
 | Double-click the tray icon | Hides or shows the pet. |
 | Ctrl+Alt+R | Opens the clipboard menu. |
 | Enter | Throws the rope at your caret (`enterrope = yes`). |
+| Ctrl+Alt+G | Web-swing: the pet shoots a web at your cursor and swings there (`webtravel = yes`). Also **Web-swing here** in the menu. |
 
 The menu shows your level, battery and audio status. It also has: start/stop the focus timer, snooze or resume the patrol, **On patrol** (turns closing on or off), nap now, the **Clipboard** and **Reminders** submenus, **Settings...**, **Start with Windows**, hide/show the pet, and **Quit**.
 
@@ -112,6 +114,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
 | `hotkey` | `yes` | Ctrl+Alt+R (restart to apply) |
 | `audio` | `yes` | Headphones and music/class reactions |
 | `climb` | `yes` | Climb the screen edges |
+| `webtravel` | `yes` | Ctrl+Alt+G web-swing to the cursor (restart to apply) |
 | `curious` | `yes` | Visit your window, comment, ask what you're doing |
 | `claude` | `yes` | React to Claude Code (after connecting it from the menu) |
 | `stretch` | `90` | Minutes of non-stop activity before a stretch nudge (`0` = off) |
