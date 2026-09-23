@@ -18,6 +18,7 @@ class Cfg
 {
     public int Countdown = 3, Snooze = 5, Focus = 25, Break = 5, Stretch = 90;
     public bool Claude = true, Push = true, Quiet;
+    public string ClipKey = "ctrl+alt+shift+c", SwingKey = "ctrl+alt+shift+w";
     public bool Nag, Wander = true, Sleepy = true, Typing = true, EnterRope = true, Climb = true, Audio = true, Clipboard = true, Hotkey = true, Curious = true, WebTravel = true;
     public double Size = 1;
     public string[] Never = new string[0];
@@ -45,9 +46,11 @@ sleepy = yes       # take naps
 typing = yes       # pulls out a laptop while you type (never records keys)
 enterrope = yes    # throws a rope at your caret/cursor when you press Enter
 climb = yes        # climbs the screen edges and walks upside-down along the top
-webtravel = yes    # Ctrl+Alt+G shoots a web to the cursor and swings the pet there (restart to apply)
+webtravel = yes    # shoots a web to the cursor and swings the pet there (swingkey below)
 clipboard = yes    # notices useful copied text (times, links, sums); ignores passwords
-hotkey = yes       # Ctrl+Alt+R opens the clipboard menu (restart to apply)
+hotkey = yes       # turn the two shortcut keys below on or off (restart to apply)
+clipkey = ctrl+alt+shift+c    # opens the clipboard menu. ctrl / alt / shift / win + a letter, digit or F-key; off = none
+swingkey = ctrl+alt+shift+w   # web-swings the pet to your mouse pointer
 curious = yes      # visits the window you're using, comments on it, asks what you're doing
 audio = yes        # wears headphones when they're connected; dances to music, takes notes in class/calls
 size = 1           # pet size multiplier (restart)
@@ -136,6 +139,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
                     case "webtravel": c.WebTravel = yes; break;
                     case "clipboard": c.Clipboard = yes; break;
                     case "hotkey": c.Hotkey = yes; break;
+                    case "clipkey": c.ClipKey = v; break;
+                    case "swingkey": c.SwingKey = v; break;
                     case "curious": c.Curious = yes; break;
                     case "audio": c.Audio = yes; break;
                     case "size": double d; if (double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out d)) c.Size = Math.Max(0.5, Math.Min(4, d)); break;
@@ -232,6 +237,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static string doing = ""; static DateTime doingUntil;
     // movie night: the flavour guessed from the title, a slow average of the volume to spot jump scares, and timers
     static string movieGenre = ""; static double movieAvg, movieCool, movieChat = 15, movieLoud, movieQuiet, scaredT;
+    static string clipKeyText = "", swingKeyText = "";                        // the shortcuts that actually registered
+    static readonly string[] ClipFallbacks = { "ctrl+alt+shift+c", "ctrl+shift+f10", "ctrl+alt+r" };
+    static readonly string[] SwingFallbacks = { "ctrl+alt+shift+w", "ctrl+shift+f11", "ctrl+alt+g" };
     static double snackT = 5, snackLeft; static int snackKind;                   // 0 = just holding them, 1 = munching popcorn, 2 = sipping the drink
     static bool MovieOn { get { return doing == "movie" && DateTime.Now < doingUntil; } }
     static readonly Dictionary<string, AgentSess> agents = new Dictionary<string, AgentSess>();   // Claude Code sessions, by session id
@@ -323,8 +331,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
         fmtHistory = RegisterClipboardFormat("CanIncludeInClipboardHistory");
         fmtIgnore = RegisterClipboardFormat("Clipboard Viewer Ignore");
         AddClipboardFormatListener(hwnd);
-        if (cfg.Hotkey && !RegisterHotKey(hwnd, 1, 0x4003, 0x52)) Say("Ctrl+Alt+R is taken by another app.", 3);   // CTRL|ALT|NOREPEAT, R
-        if (cfg.WebTravel && !RegisterHotKey(hwnd, 2, 0x4003, 0x47)) Say("Ctrl+Alt+G is taken by another app.", 3);   // CTRL|ALT|NOREPEAT, G
+        if (cfg.Hotkey) TakeHotkey(1, cfg.ClipKey, "clipkey", ClipFallbacks, out clipKeyText);
+        if (cfg.Hotkey && cfg.WebTravel) TakeHotkey(2, cfg.SwingKey, "swingkey", SwingFallbacks, out swingKeyText);
         lastTick = Environment.TickCount;
         SetTimer(hwnd, (IntPtr)1, 33, IntPtr.Zero);
         var t = new Thread(Watch); t.IsBackground = true; t.Start();
@@ -989,6 +997,29 @@ YouTube         | 240 | youtube.com/watch, - youtube
             }
         }
         catch { }
+    }
+
+    // Registers the shortcut the user asked for. Another app may own it, so a couple of spare combos are
+    // tried before giving up; the one that stuck is shown in the menu.
+    static void TakeHotkey(int id, string wanted, string setting, string[] fallbacks, out string text)
+    {
+        text = "";
+        var tries = new List<string>();
+        if (wanted != null) tries.Add(wanted.Trim());
+        foreach (var f in fallbacks) tries.Add(f);
+        string first = tries.Count > 0 ? tries[0] : "";
+        if (first == "off" || first == "none" || first == "no") return;          // deliberately disabled
+        foreach (var combo in tries)
+        {
+            uint mods, vk;
+            if (!TextTools.ParseHotkey(combo, out mods, out vk)) continue;
+            if (!RegisterHotKey(hwnd, id, mods | 0x4000, vk)) continue;          // MOD_NOREPEAT
+            text = TextTools.HotkeyText(mods, vk);
+            if (!combo.Equals(first, StringComparison.OrdinalIgnoreCase))
+                Say(first + " is taken, so I'm using " + text + ". Change it with " + setting + " in the settings.", 7);
+            return;
+        }
+        Say("Couldn't register a shortcut for " + setting + ": every choice is taken. Pick another in the settings.", 7);
     }
 
     // ------------------------------------------------------------------ quiet mode
@@ -1829,7 +1860,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         AppendMenu(m, patrol ? CHECK : 0, (UIntPtr)12, "On patrol");
         AppendMenu(m, 0, (UIntPtr)13, state == SLEEP ? "Wake up" : "Nap now");
         if (cfg.Climb) AppendMenu(m, 0, (UIntPtr)26, orient != 0 ? "Come down" : "Climb the wall");
-        if (cfg.WebTravel) AppendMenu(m, 0, (UIntPtr)27, "Web-swing here");
+        if (cfg.WebTravel) AppendMenu(m, 0, (UIntPtr)27, "Web-swing here" + (swingKeyText.Length > 0 ? "  (" + swingKeyText + ")" : ""));
         AppendMenu(m, SEP, UIntPtr.Zero, null);
         IntPtr clip = CreatePopupMenu();
         ReadClipboard(false);
@@ -1986,6 +2017,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
 
     static void AddClipItems(IntPtr m)
     {
+        if (clipKeyText.Length > 0) AppendMenu(m, GRAY, UIntPtr.Zero, "Shortcut: " + clipKeyText);
         if (clipText == null) { AppendMenu(m, GRAY, UIntPtr.Zero, cfg.Clipboard ? "Nothing usable copied (or it looked private)" : "Clipboard features are off in rules.txt"); return; }
         string first = FirstLine(clipText, 40);
         AppendMenu(m, GRAY, UIntPtr.Zero, "\"" + Menuish(first) + "\"");
@@ -2797,6 +2829,12 @@ YouTube         | 240 | youtube.com/watch, - youtube
         ok(!DecodeDay("junk", out dd0, out tt0));
         ok(DaySummary(new DateTime(2026, 9, 18), new[] { 3, 0, 2, 0, 0, 1, 1 }) == "Sep 18: closed 3 doomscroll tabs, 2 focus sessions, agents finished 1 task. Stayed up late.");
         ok(DaySummary(new DateTime(2026, 9, 18), new int[7]) == null);
+        uint mk, kk;
+        ok(TextTools.ParseHotkey("ctrl+alt+shift+c", out mk, out kk) && mk == 7 && kk == 0x43 && TextTools.HotkeyText(mk, kk) == "Ctrl+Alt+Shift+C");
+        ok(TextTools.ParseHotkey("Ctrl+Shift+F10", out mk, out kk) && mk == 6 && kk == 0x79 && TextTools.HotkeyText(mk, kk) == "Ctrl+Shift+F10");
+        ok(TextTools.ParseHotkey("win+space", out mk, out kk) && mk == 8 && kk == 0x20);
+        ok(!TextTools.ParseHotkey("r", out mk, out kk) && !TextTools.ParseHotkey("ctrl+f25", out mk, out kk));
+        ok(!TextTools.ParseHotkey("ctrl+a+b", out mk, out kk) && !TextTools.ParseHotkey("off", out mk, out kk) && !TextTools.ParseHotkey(null, out mk, out kk));
         ok(AgentDefs.All.Length == 6 && AgentDefs.Find("antigravity")[3] == "antigravity" && AgentDefs.Find("nope") == null);
         foreach (var sp in AgentDefs.All)
         {
@@ -3377,6 +3415,70 @@ static class TextTools
         if (Any(t, "action", "fast & furious", "fast and furious", "avengers", "john wick", "mission impossible", "batman", "superman", "spider-man", "spiderman", "mad max", "transformers", "terminator", "rambo", "james bond", "kgf", "pushpa", "thriller", "heist", "marvel", "gladiator")) return "action";
         if (Any(t, "animation", "animated", "pixar", "frozen", "toy story", "minions", "shrek", "kung fu panda", "cartoon", "anime", "naruto", "ghibli", "doraemon", "moana", "encanto", "bluey", "tom and jerry")) return "anim";
         return "";
+    }
+
+    // "ctrl+alt+shift+c", "win+f9", "ctrl+space": modifiers in any order, then one key.
+    public static bool ParseHotkey(string s, out uint mods, out uint vk)
+    {
+        mods = 0; vk = 0;
+        if (s == null) return false;
+        foreach (var raw in s.ToLowerInvariant().Split('+'))
+        {
+            string part = raw.Trim();
+            if (part.Length == 0) return false;
+            if (part == "ctrl" || part == "control") { mods |= 2; continue; }     // MOD_CONTROL
+            if (part == "alt") { mods |= 1; continue; }                           // MOD_ALT
+            if (part == "shift") { mods |= 4; continue; }                         // MOD_SHIFT
+            if (part == "win" || part == "windows" || part == "super" || part == "cmd") { mods |= 8; continue; }
+            if (vk != 0) return false;                                            // only one non-modifier key
+            if (part.Length == 1 && part[0] >= 'a' && part[0] <= 'z') vk = (uint)(part[0] - 'a' + 0x41);
+            else if (part.Length == 1 && part[0] >= '0' && part[0] <= '9') vk = (uint)(part[0] - '0' + 0x30);
+            else if (part[0] == 'f' && part.Length <= 3)
+            {
+                int n;
+                if (!int.TryParse(part.Substring(1), NumberStyles.None, Inv, out n) || n < 1 || n > 24) return false;
+                vk = (uint)(0x70 + n - 1);
+            }
+            else
+            {
+                switch (part)
+                {
+                    case "space": vk = 0x20; break; case "enter": case "return": vk = 0x0D; break;
+                    case "tab": vk = 0x09; break; case "insert": vk = 0x2D; break; case "delete": vk = 0x2E; break;
+                    case "home": vk = 0x24; break; case "end": vk = 0x23; break;
+                    case "pageup": case "pgup": vk = 0x21; break; case "pagedown": case "pgdn": vk = 0x22; break;
+                    case "up": vk = 0x26; break; case "down": vk = 0x28; break; case "left": vk = 0x25; break; case "right": vk = 0x27; break;
+                    case "backspace": vk = 0x08; break; case "`": case "backtick": vk = 0xC0; break;
+                    default: return false;
+                }
+            }
+        }
+        return vk != 0 && mods != 0;                                              // a bare key would swallow normal typing
+    }
+
+    public static string HotkeyText(uint mods, uint vk)
+    {
+        var sb = new StringBuilder();
+        if ((mods & 2) != 0) sb.Append("Ctrl+");
+        if ((mods & 1) != 0) sb.Append("Alt+");
+        if ((mods & 4) != 0) sb.Append("Shift+");
+        if ((mods & 8) != 0) sb.Append("Win+");
+        if (vk >= 0x41 && vk <= 0x5A) sb.Append((char)vk);
+        else if (vk >= 0x30 && vk <= 0x39) sb.Append((char)vk);
+        else if (vk >= 0x70 && vk <= 0x87) sb.Append('F').Append(vk - 0x70 + 1);
+        else
+        {
+            switch (vk)
+            {
+                case 0x20: sb.Append("Space"); break; case 0x0D: sb.Append("Enter"); break; case 0x09: sb.Append("Tab"); break;
+                case 0x2D: sb.Append("Insert"); break; case 0x2E: sb.Append("Delete"); break; case 0x24: sb.Append("Home"); break;
+                case 0x23: sb.Append("End"); break; case 0x21: sb.Append("PageUp"); break; case 0x22: sb.Append("PageDown"); break;
+                case 0x26: sb.Append("Up"); break; case 0x28: sb.Append("Down"); break; case 0x25: sb.Append("Left"); break;
+                case 0x27: sb.Append("Right"); break; case 0x08: sb.Append("Backspace"); break; case 0xC0: sb.Append('`'); break;
+                default: sb.Append('?'); break;
+            }
+        }
+        return sb.ToString();
     }
 
     // What the foreground window is, from its process name, title and URL. "" = no idea.

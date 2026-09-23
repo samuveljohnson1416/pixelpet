@@ -18,7 +18,7 @@ PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no de
 - You can drag it and throw it. It falls with gravity, bounces off the screen edges and can land on windows.
 - It climbs the screen edges and walks upside-down along the top.
 - **Windows are furniture:** throw it sideways into a window and it knocks the window aside with a "bonk!". Every so often (at most once every 10 minutes) it also walks up to a window resting on the taskbar and shoves it along a little. It never pushes the window you're using, maximized or fullscreen windows, or anything while you're focusing. `push = no` turns this off.
-- **Web-swing:** press **Ctrl+Alt+G** (or pick **Web-swing here** in the menu) and it shoots a web to your mouse pointer, swings over on an arc, and lands with a little squash, a puff of dust and hearts.
+- **Web-swing:** press **Ctrl+Alt+Shift+W** (or pick **Web-swing here** in the menu) and it shoots a web to your mouse pointer, swings over on an arc, and lands with a little squash, a puff of dust and hearts.
 - It takes naps and follows your cursor with its eyes.
 - **Curious visits:** every few minutes it hops onto (or walks under) the window you're using and reacts to what it is: code editors, terminals, GitHub, docs, mail, chat, video, music, games, shopping and more. Sometimes it asks "What are you up to?". Click it to answer from a quick menu (Working, Studying, Taking a break, Just browsing, Leave me alone). If you say you're working it gets quieter, and it nudges you if you drift to video or social media. It stays silent during meetings and focus sessions. It only uses the app name, window title and URL it already reads; nothing is captured or sent anywhere (`curious = no` turns it off).
 - Clicking it counts as a pat and gives XP; closing a doomscroll tab, finishing reminders and Claude Code finishing a task give XP too. Your level is saved.
@@ -39,7 +39,7 @@ PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no de
 - A Pomodoro timer: 25 min of focus, then a 5 min break (both configurable). The pet shows the countdown and celebrates when each phase ends.
 
 **Clipboard helper**
-- When you copy something useful, a `!` pops up over the pet. Click the pet within 8 seconds to see the options. You can also open the menu at any time with **Ctrl+Alt+R** or through the tray menu.
+- When you copy something useful, a `!` pops up over the pet. Click the pet within 8 seconds to see the options. You can also open the menu at any time with **Ctrl+Alt+Shift+C** or through the tray menu. Both shortcuts are configurable, and if another app already owns one, the pet takes a spare combo and tells you which.
 - Turn a copied phrase with a time in it into a reminder: "call mom in 20 min", "pay rent at 5pm", "standup tomorrow", "gym tomorrow at 7:30am". You can also remind yourself about any copied text in 10 min, 30 min, 1 hour, 3 hours or tomorrow at 9:00.
 - Copy a clean link: it strips tracking parameters (`utm_*`, `fbclid`, `gclid`, `msclkid` and others, plus `si` on YouTube and Spotify links).
 - Copy a math result: `12*7.5` becomes `90`, `(2+3)^2 - 1` becomes `24`. Dates and phone numbers aren't treated as math.
@@ -94,9 +94,9 @@ Settings and progress are saved in `%APPDATA%\PixelPet Focus`. To have it start 
 | Drag the pet | Pick it up. Let go to throw it. |
 | Right-click the pet or the tray icon | Opens the menu. |
 | Double-click the tray icon | Hides or shows the pet. |
-| Ctrl+Alt+R | Opens the clipboard menu. |
+| Ctrl+Alt+Shift+C | Opens the clipboard menu. Change it with `clipkey`. |
 | Enter | Throws the rope at your caret (`enterrope = yes`). |
-| Ctrl+Alt+G | Web-swing: the pet shoots a web at your cursor and swings there (`webtravel = yes`). Also **Web-swing here** in the menu. |
+| Ctrl+Alt+Shift+W | Web-swing: the pet shoots a web at your cursor and swings there (`webtravel = yes`). Change it with `swingkey`. Also **Web-swing here** in the menu. |
 
 The menu shows your level, battery and audio status. It also has: start/stop the focus timer, snooze or resume the patrol, **On patrol** (turns closing on or off), nap now, the **Clipboard** and **Reminders** submenus, **Settings...**, **Start with Windows**, hide/show the pet, and **Quit**.
 
@@ -129,10 +129,12 @@ YouTube         | 240 | youtube.com/watch, - youtube
 | `typing` | `yes` | Laptop animation while you type |
 | `enterrope` | `yes` | Rope on Enter |
 | `clipboard` | `yes` | Clipboard helper |
-| `hotkey` | `yes` | Ctrl+Alt+R (restart to apply) |
+| `hotkey` | `yes` | Turn the two shortcut keys on or off (restart to apply) |
+| `clipkey` | `ctrl+alt+shift+c` | Shortcut for the clipboard menu. `ctrl` / `alt` / `shift` / `win` plus a letter, digit or F-key. `off` for none |
+| `swingkey` | `ctrl+alt+shift+w` | Shortcut for the web-swing |
 | `audio` | `yes` | Headphones and music/class reactions |
 | `climb` | `yes` | Climb the screen edges |
-| `webtravel` | `yes` | Ctrl+Alt+G web-swing to the cursor (restart to apply) |
+| `webtravel` | `yes` | Web-swing to the cursor (restart to apply) |
 | `curious` | `yes` | Visit your window, comment, ask what you're doing |
 | `agents` | `yes` | React to coding agents (after connecting them from the menu). `claude` still works as the old name |
 | `stretch` | `90` | Minutes of non-stop activity before a stretch nudge (`0` = off) |

@@ -14,7 +14,7 @@ static class Settings
               ID_SIZE = 111, ID_FOCUS = 112, ID_BREAK = 113, ID_AUTOSTART = 114, ID_LIST = 115,
               ID_RLABEL = 116, ID_RSECS = 117, ID_RPATS = 118, ID_ADD = 119, ID_APPLY = 120,
               ID_DEL = 121, ID_DEFAULTS = 122, ID_NEVER = 123, ID_SAVE = 124, ID_CLOSEBTN = 125,
-              ID_OPENTXT = 126, ID_UP = 127, ID_DOWN = 128, ID_CLIP = 129, ID_HOTKEY = 130, ID_CLIMB = 131, ID_WEB = 132;
+              ID_OPENTXT = 126, ID_UP = 127, ID_DOWN = 128, ID_CLIP = 129, ID_HOTKEY = 130, ID_CLIMB = 131, ID_WEB = 132, ID_CLIPKEY = 133, ID_SWINGKEY = 134;
 
     static readonly double[] Sizes = { 0.75, 1, 1.25, 1.5, 2 };
     static readonly string[] SizeNames = { "0.75x", "1x", "1.25x", "1.5x", "2x" };
@@ -43,7 +43,7 @@ static class Settings
         var o = new Cfg();
         o.Countdown = c.Countdown; o.Snooze = c.Snooze; o.Focus = c.Focus; o.Break = c.Break;
         o.Nag = c.Nag; o.Wander = c.Wander; o.Sleepy = c.Sleepy; o.Typing = c.Typing;
-        o.EnterRope = c.EnterRope; o.Climb = c.Climb; o.WebTravel = c.WebTravel; o.Audio = c.Audio; o.Clipboard = c.Clipboard; o.Hotkey = c.Hotkey; o.Curious = c.Curious; o.Claude = c.Claude; o.Stretch = c.Stretch; o.Push = c.Push; o.Quiet = c.Quiet; o.Size = c.Size;
+        o.EnterRope = c.EnterRope; o.Climb = c.Climb; o.WebTravel = c.WebTravel; o.Audio = c.Audio; o.Clipboard = c.Clipboard; o.Hotkey = c.Hotkey; o.Curious = c.Curious; o.Claude = c.Claude; o.Stretch = c.Stretch; o.Push = c.Push; o.Quiet = c.Quiet; o.ClipKey = c.ClipKey; o.SwingKey = c.SwingKey; o.Size = c.Size;
         o.Never = (string[])c.Never.Clone();
         o.Rules = c.Rules;
         return o;
@@ -69,7 +69,7 @@ static class Settings
             classReady = true;
         }
 
-        int w = D(676), h = D(696);
+        int w = D(676), h = D(752);
         var scr = new RECT(); SystemParametersInfo(0x30, 0, ref scr, 0);
         int px = (scr.L + scr.R - w) / 2, py = (scr.T + scr.B - h) / 2;
         // WS_OVERLAPPED|CAPTION|SYSMENU|MINIMIZEBOX, sized so the client area fits the layout
@@ -134,10 +134,15 @@ static class Settings
         Label("Break (min)", 24, 446, 140);
         Edit(170, 444, 60, 22, 0x2000, ID_BREAK);
 
-        Group("Clipboard && Windows", 12, 494, 312, 106);
+        Group("Clipboard && Windows", 12, 494, 312, 162);
         Check("React to copied text (links, sums, reminders)", 24, 514, 290, ID_CLIP);
-        Check("Ctrl+Alt+R opens the clipboard menu", 24, 538, 290, ID_HOTKEY);
-        Check("Start with Windows", 24, 562, 280, ID_AUTOSTART);
+        Check("Shortcut keys (restart to apply)", 24, 538, 290, ID_HOTKEY);
+        Label("Clipboard menu", 36, 566, 118);
+        Edit(158, 564, 152, 22, 0, ID_CLIPKEY);
+        Label("Web-swing", 36, 594, 118);
+        Edit(158, 592, 152, 22, 0, ID_SWINGKEY);
+        Label("e.g. ctrl+alt+shift+c, win+f9, or off", 36, 620, 280);
+        Check("Start with Windows", 24, 640, 280, ID_AUTOSTART);
 
         Group("What counts as doomscrolling", 334, 6, 328, 450);
         list = Mk("SysListView32", "", 0x1000D, 344, 26, 308, 172, ID_LIST, 0x200); // WS_TABSTOP|LVS_REPORT|SINGLESEL|SHOWSELALWAYS
@@ -202,6 +207,7 @@ static class Settings
         SetCheck(ID_WANDER, cfg.Wander); SetCheck(ID_SLEEPY, cfg.Sleepy);
         SetCheck(ID_TYPING, cfg.Typing); SetCheck(ID_ROPE, cfg.EnterRope); SetCheck(ID_AUDIO, cfg.Audio);
         SetCheck(ID_CLIP, cfg.Clipboard); SetCheck(ID_HOTKEY, cfg.Hotkey); SetCheck(ID_CLIMB, cfg.Climb); SetCheck(ID_WEB, cfg.WebTravel);
+        SetText(ID_CLIPKEY, cfg.ClipKey); SetText(ID_SWINGKEY, cfg.SwingKey);
         int pick = 1;
         for (int i = 0; i < Sizes.Length; i++) if (Math.Abs(Sizes[i] - cfg.Size) < 0.01) pick = i;
         SendMessage(ctl[ID_SIZE], 0x014E, (IntPtr)pick, IntPtr.Zero);                   // CB_SETCURSEL
@@ -211,6 +217,16 @@ static class Settings
         rules.Clear();
         foreach (var r in cfg.Rules) rules.Add(new Rule { Label = r.Label, Grace = r.Grace, Any = (string[])r.Any.Clone() });
         Fill(-1);
+    }
+
+    // A typed shortcut, kept only if it parses; "off" disables it.
+    static string Key(int id, string current)
+    {
+        string t = GetText(id).Trim().ToLowerInvariant();
+        uint mods, vk;
+        if (t == "off" || t == "none" || TextTools.ParseHotkey(t, out mods, out vk)) return t;
+        Status("\"" + t + "\" isn't a shortcut I understand, so I kept " + current);
+        return current;
     }
 
     static void Fill(int select)
@@ -279,6 +295,7 @@ static class Settings
         cfg.Wander = GetCheck(ID_WANDER); cfg.Sleepy = GetCheck(ID_SLEEPY);
         cfg.Typing = GetCheck(ID_TYPING); cfg.EnterRope = GetCheck(ID_ROPE); cfg.Audio = GetCheck(ID_AUDIO);
         cfg.Clipboard = GetCheck(ID_CLIP); cfg.Hotkey = GetCheck(ID_HOTKEY); cfg.Climb = GetCheck(ID_CLIMB); cfg.WebTravel = GetCheck(ID_WEB);
+        cfg.ClipKey = Key(ID_CLIPKEY, cfg.ClipKey); cfg.SwingKey = Key(ID_SWINGKEY, cfg.SwingKey);
         cfg.Focus = GetNum(ID_FOCUS, 1, 600, 25); cfg.Break = GetNum(ID_BREAK, 1, 600, 5);
         int sel = SendMessage(ctl[ID_SIZE], 0x0147, IntPtr.Zero, IntPtr.Zero).ToInt32();   // CB_GETCURSEL
         cfg.Size = sel >= 0 && sel < Sizes.Length ? Sizes[sel] : 1;
@@ -316,6 +333,8 @@ static class Settings
         sb.Append("audio = ").Append(YN(c.Audio)).Append("\r\n");
         sb.Append("clipboard = ").Append(YN(c.Clipboard)).Append("\r\n");
         sb.Append("hotkey = ").Append(YN(c.Hotkey)).Append("\r\n");
+        sb.Append("clipkey = ").Append(c.ClipKey).Append("\r\n");
+        sb.Append("swingkey = ").Append(c.SwingKey).Append("\r\n");
         sb.Append("size = ").Append(c.Size.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
         sb.Append("focus = ").Append(c.Focus).Append("\r\n");
         sb.Append("break = ").Append(c.Break).Append("\r\n");
