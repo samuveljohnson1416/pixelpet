@@ -232,6 +232,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static string doing = ""; static DateTime doingUntil;
     // movie night: the flavour guessed from the title, a slow average of the volume to spot jump scares, and timers
     static string movieGenre = ""; static double movieAvg, movieCool, movieChat = 15, movieLoud, movieQuiet, scaredT;
+    static double snackT = 5, snackLeft; static int snackKind;                   // 0 = just holding them, 1 = munching popcorn, 2 = sipping the drink
     static bool MovieOn { get { return doing == "movie" && DateTime.Now < doingUntil; } }
     static readonly Dictionary<string, AgentSess> agents = new Dictionary<string, AgentSess>();   // Claude Code sessions, by session id
     static DateTime lastAgentXp; static int activeSec;
@@ -1364,7 +1365,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static string Pick(params string[] a) { return a[rnd.Next(a.Length)]; }
     static void MovieTick(double dt)
     {
-        if (!MovieOn) { if (movieGenre.Length > 0) movieGenre = ""; scaredT = 0; return; }
+        if (!MovieOn) { if (movieGenre.Length > 0) movieGenre = ""; scaredT = 0; snackKind = 0; return; }
         scaredT = Math.Max(0, scaredT - dt); movieCool -= dt; movieChat -= dt;
         string g = TextTools.Genre(fgTitle); if (g.Length > 0) movieGenre = g;       // sticky: the title may change to "Netflix" in fullscreen
         double pk = cfg.Audio ? audioPeak : 0;
@@ -1373,13 +1374,36 @@ YouTube         | 240 | youtube.com/watch, - youtube
         movieAvg += (pk - movieAvg) * Math.Min(1, dt * 0.5);
         if (pk > 0.01) { movieQuiet = 0; movieLoud += dt; }
         else if ((movieQuiet += dt) > 20 && movieLoud > 1800) { movieLoud = 0; Chirp("Credits! Was it good?", 3); Hearts(3); joyT = 1.5; }
-        if (!calm) return;
+        if (!calm) { snackKind = 0; return; }
+        Snacks(dt);
         if (spike) { movieCool = 7; Startle(); }
         else if (movieChat <= 0) { movieChat = Rand(35, 70); Vibe(); }
     }
 
+    // Between reactions it keeps helping itself: a handful of popcorn, then a sip through the straw.
+    static void Snacks(double dt)
+    {
+        if (snackKind != 0)
+        {
+            snackLeft -= dt;
+            if (snackLeft > 0) return;
+            snackKind = 0; snackT = Rand(6, 14);
+            return;
+        }
+        if ((snackT -= dt) > 0) return;
+        if (rnd.NextDouble() < 0.6)
+        {
+            snackKind = 1; snackLeft = Rand(1.8, 3);                             // a few handfuls
+            parts.Add(new Part { X = x + Rand(-1, 2) * U, Y = y - 7 * U, VY = -26 * S, Life = 0.8, Text = "•" });
+        }
+        else { snackKind = 2; snackLeft = Rand(1.6, 2.4); parts.Add(new Part { X = x - 5 * U, Y = y - 7 * U, VY = -22 * S, Life = 1, Text = "slurp" }); }
+    }
+
     static void Startle()
     {
+        if (MovieOn && snackKind == 0 && rnd.NextDouble() < 0.7)                  // jumped: the popcorn goes flying
+            for (int i = 0; i < 5; i++)
+                parts.Add(new Part { X = x + Rand(-2, 3) * U, Y = y - 7 * U, VY = -Rand(40, 80) * S, Life = Rand(0.7, 1.2), Text = "•" });
         sqK = 0.8; sqT = 0.25;
         parts.Add(new Part { X = x, Y = y - 12 * U, VY = -30 * S, Life = 0.8, Text = "!" });
         bool ground = orient == 0 && perch == IntPtr.Zero;
@@ -2600,11 +2624,23 @@ YouTube         | 240 | youtube.com/watch, - youtube
             Px(facing > 0 ? 11 + shove : 0 - shove, 5.1 + dy, 3, 1.4, body);
         }
         if (swipeStrike) Px(facing > 0 ? 12 : -2, 3, 4, 2, body);
-        if (state == SIT && alert == null && sign == null && orient == 0 && MovieOn)   // popcorn bucket, munching now and then
+        if (state == SIT && alert == null && sign == null && orient == 0 && MovieOn)   // popcorn in one paw, a drink in the other
         {
-            Px(4.5, 4.8, 5, 3.2, ANGRY); Px(5.6, 4.8, 0.8, 3.2, WHITE); Px(7.6, 4.8, 0.8, 3.2, WHITE);
-            Px(5, 4.1, 1.1, 1, WHITE); Px(6.3, 3.8, 1.3, 1.2, STAR); Px(7.6, 4.1, 1.1, 1, WHITE);
-            if ((int)(animT * 3) % 4 == 0) Px(3.2, 3.6, 1.6, 1.6, body);
+            Px(4.5, 4.8, 5, 3.2, ANGRY); Px(5.6, 4.8, 0.8, 3.2, WHITE); Px(7.6, 4.8, 0.8, 3.2, WHITE);   // striped bucket
+            Px(5, 4.1, 1.1, 1, WHITE); Px(6.3, 3.8, 1.3, 1.2, STAR); Px(7.6, 4.1, 1.1, 1, WHITE);        // kernels heaped on top
+            bool munching = snackKind == 1, sipping = snackKind == 2;
+
+            double cupTop = sipping ? 4.2 : 4.7;                                 // the cup lifts a little to drink
+            Px(0.5, cupTop + 0.4, 2.8, 3.4 - (sipping ? 0.5 : 0), WHITE);        // cup
+            Px(1.3, cupTop + 0.4, 0.5, 3.4 - (sipping ? 0.5 : 0), ANGRY); Px(2.3, cupTop + 0.4, 0.5, 3.4 - (sipping ? 0.5 : 0), ANGRY);
+            Px(0.3, cupTop, 3.2, 0.5, DARK);                                     // lid
+            Px(2.2, cupTop - 2.2, 0.45, 2.3, STAR);                              // straw
+            Px(2.2, cupTop - 2.2, sipping ? 1.7 : 1.1, 0.45, STAR);              // bent toward the mouth while sipping
+            if (sipping && (int)(animT * 6) % 2 == 0) Px(3.9, cupTop - 2.4, 0.5, 0.5, WHITE);   // a little slurp mark
+
+            double paw = munching ? (animT * 2.5) % 1 : 0;                        // paw dips into the bucket and comes back up
+            Px(3.3, (munching ? 4.4 - paw * 1.6 : 4.6), 1.7, 1.5, body);
+            if (munching && paw > 0.75) Px(4.6, 3.2, 0.6, 0.6, STAR);            // a kernel on the way to its mouth
         }
 
         if (sleeping || (blinkOn > 0 && !angry && !joy)) { Px(3.8, 3 + dy, 1.4, 0.5, EYE); Px(8.8, 3 + dy, 1.4, 0.5, EYE); }
