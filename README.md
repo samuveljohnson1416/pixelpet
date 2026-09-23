@@ -53,10 +53,22 @@ PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no de
 - `every` reminders skip while you've been away for more than 5 minutes. During a focus session they wait for your break.
 - No reminder pops up while a fullscreen app, game or presentation is running. They wait until it ends.
 
-**Claude Code companion**
-- Choose **Claude Code > Connect Claude Code...** in the menu once. After you confirm, it adds four hooks (`UserPromptSubmit`, `Notification`, `Stop`, `SessionEnd`) to `~/.claude/settings.json`, backing the file up first to `settings.json.pixelpet-backup`. It never touches other hooks, and **Disconnect** removes only its own entries.
-- While Claude works, a `Claude working 3:12` tag shows over the pet. When Claude needs your permission or is waiting for you, the pet runs to your cursor, waves and beeps. When a task finishes it cheers and earns 10 XP. If the pet is hidden, you get tray notifications instead. The menu lists each session with its project folder and state.
-- The hook is `PixelPetFocus.exe --claude-hook`. It reads the event from Claude Code, hands it to the running pet through a window message, prints nothing and exits within a moment. If the pet isn't running it simply does nothing.
+**Coding-agent companion**
+- Works with **Claude Code, Codex, Gemini CLI, Antigravity, Cursor and Windsurf**. Open **AI agents** in the menu: it lists the ones it finds on your PC, and you connect each with one click.
+
+  | Agent | Config it writes | Tells you it's working | "Needs you" alerts |
+  | --- | --- | --- | --- |
+  | Claude Code | `~/.claude/settings.json` | yes | yes |
+  | Codex | `~/.codex/hooks.json` | yes | yes (permission requests) |
+  | Gemini CLI | `~/.gemini/settings.json` | yes | yes |
+  | Antigravity | `~/.gemini/config/hooks.json` | yes | no (it has no such hook) |
+  | Cursor | `~/.cursor/hooks.json` | yes | no |
+  | Windsurf | `~/.codeium/windsurf/hooks.json` | yes | no |
+
+- After you confirm, it adds its own hook entries, backing the file up first to `<name>.pixelpet-backup`. It never touches other tools' hooks, and **Disconnect** removes only its own entries.
+- While an agent works, a `Claude Code working 3:12` tag shows over the pet. When one needs your permission or is waiting, the pet runs to your cursor, waves and beeps. When a task finishes it cheers and earns 10 XP. If the pet is hidden you get tray notifications instead. The menu lists each session with its agent, project folder and state.
+- The hook is `PixelPetFocus.exe --agent-hook <agent> <state>`. It hands the event to the running pet through a local window message, prints nothing and exits within a moment. If the pet isn't running it does nothing.
+- **Put the exe somewhere permanent before connecting.** The hooks store its full path, so they break if you move or delete it. The app warns you if you connect from a Downloads or temporary folder. If you do move it, connect again.
 
 **Settings**
 - **Settings...** in the menu opens a small native window: add, edit, reorder or remove site rules, edit the never-touch list, and flip every toggle. Launching the exe a second time also opens it.
@@ -122,7 +134,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
 | `climb` | `yes` | Climb the screen edges |
 | `webtravel` | `yes` | Ctrl+Alt+G web-swing to the cursor (restart to apply) |
 | `curious` | `yes` | Visit your window, comment, ask what you're doing |
-| `claude` | `yes` | React to Claude Code (after connecting it from the menu) |
+| `agents` | `yes` | React to coding agents (after connecting them from the menu). `claude` still works as the old name |
 | `stretch` | `90` | Minutes of non-stop activity before a stretch nudge (`0` = off) |
 | `push` | `yes` | Nudge windows around; throw the pet into a window to knock it aside |
 | `quiet` | `no` | `yes` = barely talks (keeps only the important messages) |
@@ -167,7 +179,7 @@ GitHub Actions builds every push the same way, runs the self-test and attaches t
 - **What it looks at:** the foreground window's title and process name, and the address bar in the browsers listed above. It checks these once a second in memory, only to match your rules. For audio it reads device names, output levels and the titles of the windows playing sound. It never reads the sound itself.
 - **No keylogging.** There's no keyboard hook. To detect typing it checks that new input arrived, that the mouse didn't move and that some text key is held down right now. All that feeds is an "is typing" level. It never records or stores which keys you press. The Enter rope only checks whether Enter is down.
 - **Clipboard:** it only looks at text copies of up to 2,000 characters. It skips anything marked private by password managers or clipboard-history exclusions, anything that looks like a key or token (`sk-`, `ghp_`, `github_pat_`, `AKIA`, `xox`, JWTs, PEM blocks), 4 to 8 digit codes, and single words that mix letters, digits and symbols like a password. Clipboard text stays in memory and is never written to disk. The one exception is when you pick a **Remind me** option: then the reminder's short message is saved to `reminders.txt`.
-- **Claude Code:** the hook passes only the event name, the session id, the project folder and Claude's notification text to the pet. It sends them through a local window message, and nothing leaves your PC. `~/.claude/settings.json` is changed only when you click **Connect** or **Disconnect**. That runs as a separate short-lived process, so the pet itself never loads a JSON library.
+- **Coding agents:** the hook passes only the state, the session id, the project folder and the agent's notification text to the pet. It sends them through a local window message, and nothing leaves your PC. `~/.claude/settings.json` is changed only when you click **Connect** or **Disconnect**. That runs as a separate short-lived process, so the pet itself never loads a JSON library.
 - **What it writes:** `rules.txt`, `reminders.txt`, `progress.txt` (level, XP, counters, streak, achievements and a 2-week daily tally) and `memories.txt` (the memory book, plain text) in `%APPDATA%\PixelPet Focus`, plus the Run registry value if you tick **Start with Windows**.
 
 ## Resource use

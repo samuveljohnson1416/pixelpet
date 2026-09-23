@@ -26,7 +26,7 @@ class Cfg
 
 class Reminder { public string Line, Kind, Msg; public DateTime At, Next; public int Every, From = -1, To = -1; }
 
-class AgentSess { public string State = "", Project = ""; public DateTime Since, Seen, LastPing; }
+class AgentSess { public string State = "", Project = "", Who = "Agent"; public DateTime Since, Seen, LastPing; }
 
 class Bust { public IntPtr Hwnd; public string Title, Proc, Label, Scold; public int CenterX; }
 
@@ -54,7 +54,7 @@ size = 1           # pet size multiplier (restart)
 focus = 25         # focus timer minutes
 break = 5          # break minutes
 stretch = 90       # nudge to stretch after this many minutes of non-stop activity (0 = off)
-claude = yes       # reacts when Claude Code works, needs you, or finishes (connect it from the menu)
+agents = yes       # reacts when a coding agent (Claude Code, Codex, Gemini, Antigravity...) works, needs you, or finishes
 push = yes         # nudges windows around like furniture now and then; throw it at a window to knock it aside
 quiet = no         # yes = barely talks: still visits and reacts, keeps chit-chat to a minimum
 
@@ -124,7 +124,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                     case "focus": c.Focus = Math.Max(1, n); break;
                     case "break": c.Break = Math.Max(1, n); break;
                     case "stretch": c.Stretch = Math.Max(0, n); break;
-                    case "claude": c.Claude = yes; break;
+                    case "claude": case "agents": c.Claude = yes; break;
                     case "push": c.Push = yes; break;
                     case "quiet": c.Quiet = yes; break;
                     case "mode": c.Nag = v == "nag"; break;
@@ -246,9 +246,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static readonly EnumWindowsProc collectCb = CollectCb;
     static readonly string[] PushLines = { "There. Much better.", "Rearranging the furniture.", "Tidy desk, tidy mind.", "Hnngh... done!" };
     static readonly string[] AchNames = { "First patrol", "Doomscroll slayer", "Deep focus", "Focus machine", "Remembered!", "Clipboard pro",
-        "Claude buddy", "Pair programmer", "On a roll", "Week warrior", "Night owl", "Companion", "Hero", "Legend" };
+        "Agent buddy", "Pair programmer", "On a roll", "Week warrior", "Night owl", "Companion", "Hero", "Legend" };
     static readonly string[] AchHow = { "close a doomscroll tab", "close 25 of them", "finish a focus session", "finish 25 focus sessions",
-        "finish a reminder", "use 10 clipboard actions", "Claude Code finishes a task", "Claude Code finishes 100 tasks",
+        "finish a reminder", "use 10 clipboard actions", "a coding agent finishes a task", "agents finish 100 tasks",
         "3-day streak", "7-day streak", "be active after midnight", "reach level 5", "reach level 20", "reach level 35" };                        // your quick-reply answer and how long it holds
     static readonly string[] Codes = { "{ }", "01", ";", "</>", "#", "=>", "()" };
     static readonly string[] LandingLines = { "Ta-da!", "Stuck the landing!", "Whee, made it!", "Web-slinging pro!", "Boop!" };
@@ -265,8 +265,10 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static void Main(string[] args)
     {
         if (args.Length > 0 && args[0] == "--selftest") { Environment.Exit(SelfTest()); }
-        if (args.Length > 0 && args[0] == "--claude-hook") { ForwardHook(); return; }             // run by Claude Code on its events
-        if (args.Length > 0 && (args[0] == "--connect-claude" || args[0] == "--disconnect-claude")) { Environment.Exit(ClaudeSetup.Run(args[0] == "--connect-claude")); }
+        if (args.Length > 2 && args[0] == "--agent-hook") { ForwardHook(args[1], args[2]); return; }   // run by an agent CLI on its events
+        if (args.Length > 0 && args[0] == "--claude-hook") { ForwardHook("claude", ""); return; }        // hooks installed by older builds
+        if (args.Length > 1 && (args[0] == "--connect" || args[0] == "--disconnect")) { Environment.Exit(AgentSetup.Run(args[1], args[0] == "--connect")); }
+        if (args.Length > 0 && (args[0] == "--connect-claude" || args[0] == "--disconnect-claude")) { Environment.Exit(AgentSetup.Run("claude", args[0] == "--connect-claude")); }
         bool created; var mutex = new Mutex(true, "PixelPetFocus.Single", out created);
         if (!created) { PostMessage(FindWindow("PixelPetFocus", null), 0x8003, IntPtr.Zero, IntPtr.Zero); return; }   // 2nd launch: open Settings
 
@@ -749,18 +751,23 @@ YouTube         | 240 | youtube.com/watch, - youtube
         else SetState(SIT, Rand(2, 5));
     }
 
-    // ------------------------------------------------------------------ Claude Code status (idea from AgentPet, MIT)
-    // Claude Code runs `PixelPetFocus.exe --claude-hook` on UserPromptSubmit / Notification / Stop / SessionEnd.
-    // That short-lived process forwards the event here over WM_COPYDATA and exits; the pet reacts.
-    static void ForwardHook()
+    // ------------------------------------------------------------------ coding-agent status (idea from AgentPet, MIT)
+    // Each agent CLI runs `PixelPetFocus.exe --agent-hook <agent> <state>` on its own events; the state is baked
+    // into the command at install time, so nothing has to be guessed here. This short-lived process forwards it
+    // over WM_COPYDATA and exits.
+    static void ForwardHook(string key, string state)
     {
         string json = "";
         var t = new Thread(delegate () { try { json = new StreamReader(Console.OpenStandardInput(), Encoding.UTF8).ReadToEnd(); } catch { } });
-        t.IsBackground = true; t.Start(); t.Join(1500);                          // never hold Claude Code up
+        t.IsBackground = true; t.Start(); t.Join(1500);                          // never hold the agent up
         if (json.Length > 200000) json = json.Substring(0, 200000);
-        string ev = TextTools.JsonField(json, "hook_event_name");
-        if (ev.Length == 0) return;
-        string data = ev + "\n" + TextTools.JsonField(json, "session_id") + "\n" + TextTools.JsonField(json, "cwd") + "\n" + TextTools.JsonField(json, "message");
+        if (state.Length == 0) state = TextTools.JsonField(json, "hook_event_name");   // old --claude-hook installs send the event name
+        if (state.Length == 0) return;
+        string sid = First(TextTools.JsonField(json, "session_id"), TextTools.JsonField(json, "sessionId"),
+                           TextTools.JsonField(json, "conversation_id"), TextTools.JsonField(json, "conversationId"));
+        string cwd = First(TextTools.JsonField(json, "cwd"), TextTools.JsonField(json, "workspace_path"), TextTools.JsonField(json, "workspaceRoot"));
+        string[] spec = AgentDefs.Find(key);
+        string data = state + "\n" + sid + "\n" + cwd + "\n" + TextTools.JsonField(json, "message") + "\n" + (spec != null ? spec[1] : key);
         IntPtr w = FindWindow("PixelPetFocus", "PixelPet Focus");
         if (w == IntPtr.Zero) return;                                            // pet not running: nothing to do
         var cds = new COPYDATASTRUCT { dwData = (IntPtr)0x5050, cbData = (data.Length + 1) * 2, lpData = Marshal.StringToHGlobalUni(data) };
@@ -769,25 +776,29 @@ YouTube         | 240 | youtube.com/watch, - youtube
         Marshal.FreeHGlobal(cds.lpData);
     }
 
+    static string First(params string[] v) { foreach (var x in v) if (x != null && x.Length > 0) return x; return ""; }
+
     static void OnCopyData(IntPtr l)
     {
         var cds = (COPYDATASTRUCT)Marshal.PtrToStructure(l, typeof(COPYDATASTRUCT));
         if (cds.dwData != (IntPtr)0x5050 || cds.cbData <= 0 || cds.cbData > 8192 || cds.lpData == IntPtr.Zero) return;
         var f = Marshal.PtrToStringUni(cds.lpData, cds.cbData / 2).TrimEnd('\0').Split('\n');
-        if (f.Length >= 4) OnAgentEvent(f[0], f[1], f[2], f[3]);
+        if (f.Length >= 4) OnAgentEvent(f[0], f[1], f[2], f[3], f.Length >= 5 && f[4].Length > 0 ? f[4] : "Claude Code");
     }
 
-    static void OnAgentEvent(string ev, string sid, string cwd, string msg)
+    static void OnAgentEvent(string ev, string sid, string cwd, string msg, string who)
     {
         if (!cfg.Claude) return;
         DateTime now = DateTime.Now;
-        if (sid.Length == 0) sid = cwd;
-        if (ev == "SessionEnd") { agents.Remove(sid); return; }
-        string st = ev == "UserPromptSubmit" || ev == "PreToolUse" ? "working" : ev == "Notification" ? "waiting" : ev == "Stop" ? "done" : "";
+        string st = ev == "working" || ev == "waiting" || ev == "done" || ev == "end" ? ev
+            : ev == "UserPromptSubmit" || ev == "PreToolUse" ? "working"                    // names from old --claude-hook installs
+            : ev == "Notification" ? "waiting" : ev == "Stop" ? "done" : ev == "SessionEnd" ? "end" : "";
         if (st.Length == 0) return;
+        string id = who + "|" + (sid.Length > 0 ? sid : cwd);                    // two agents can share a project folder
+        if (st == "end") { agents.Remove(id); return; }
         AgentSess a;
-        if (!agents.TryGetValue(sid, out a)) { a = new AgentSess(); agents[sid] = a; }
-        a.Project = TextTools.ProjectName(cwd); a.Seen = now;
+        if (!agents.TryGetValue(id, out a)) { a = new AgentSess(); agents[id] = a; }
+        a.Project = TextTools.ProjectName(cwd); a.Seen = now; a.Who = who;
         if (a.State != st) { a.State = st; a.Since = now; }
         string proj = a.Project.Length > 0 ? " (" + a.Project + ")" : "";
         bool free = alert == null && sign == null;
@@ -795,9 +806,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
         {
             if ((now - a.LastPing).TotalSeconds < 60) return;                      // one nudge a minute per session
             a.LastPing = now;
-            string text = msg.ToLowerInvariant().Contains("permission") ? "Claude needs your OK" + proj + "!" : "Claude is waiting for you" + proj + ".";
+            string text = msg.ToLowerInvariant().Contains("permission") ? who + " needs your OK" + proj + "!" : who + " is waiting for you" + proj + ".";
             MessageBeep(0x30);
-            if (hidden) Tray(1, "Claude Code", text);
+            if (hidden) Tray(1, who, text);
             if (!free) return;
             Say(text, 6); joyT = 3;                                              // arms up, waving you over
             if (orient == 0 && (state == SIT || state == WALK || state == SLEEP || state == TYPE)) { POINT c; GetCursorPos(out c); Walk(c.X); }
@@ -805,18 +816,18 @@ YouTube         | 240 | youtube.com/watch, - youtube
         else if (st == "done")
         {
             Did(ref claudeDone, 5);
-            if (hidden) Tray(1, "Claude Code", "Claude finished" + proj + ".");
+            if (hidden) Tray(1, who, who + " finished" + proj + ".");
             if (!free) return;
-            Say("Claude finished" + proj + "!", 4); Hearts(4);
+            Say(who + " finished" + proj + "!", 4); Hearts(4);
             if (orient == 0 && (state == SIT || state == WALK || state == SLEEP)) Hop(0, -520 * S);
             if ((now - lastAgentXp).TotalSeconds >= 30) { lastAgentXp = now; Award(10); }
         }
     }
 
-    // A tag above the pet while Claude works or waits; also drops sessions that went quiet.
+    // A tag above the pet while an agent works or waits; also drops sessions that went quiet.
     static string AgentTag()
     {
-        DateTime now = DateTime.Now, since = now; int working = 0, waiting = 0;
+        DateTime now = DateTime.Now, since = now; int working = 0, waiting = 0; string who = "", waitWho = "";
         List<string> stale = null;
         foreach (var kv in agents)
         {
@@ -827,43 +838,43 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 stale.Add(kv.Key); continue;
             }
             if (a.State == "working" && now - a.Seen > TimeSpan.FromMinutes(30)) a.State = "idle";   // interrupted without a Stop
-            if (a.State == "working") { working++; if (a.Since < since) since = a.Since; }
-            else if (a.State == "waiting" && now - a.Since < TimeSpan.FromMinutes(3)) waiting++;
+            if (a.State == "working") { working++; if (a.Since < since) { since = a.Since; who = a.Who; } }
+            else if (a.State == "waiting" && now - a.Since < TimeSpan.FromMinutes(3)) { waiting++; waitWho = a.Who; }
         }
         if (stale != null) foreach (var k in stale) agents.Remove(k);
         if (!cfg.Claude) return null;
-        if (waiting > 0) return waiting == 1 ? "Claude needs you" : waiting + " Claudes need you";
-        if (working == 1) return "Claude working " + Dur(now - since);
-        if (working > 1) return working + " Claudes working";
+        if (waiting == 1) return waitWho + " needs you";
+        if (waiting > 1) return waiting + " agents need you";
+        if (working == 1) return who + " working " + Dur(now - since);
+        if (working > 1) return working + " agents working";
         return null;
     }
 
     static string Dur(TimeSpan d) { return d.TotalHours >= 1 ? (int)d.TotalHours + "h" + d.Minutes.ToString("00") : (int)d.TotalMinutes + ":" + d.Seconds.ToString("00"); }
 
-    static bool ClaudeConnected()
+    static void AddAgentItems(IntPtr m)
     {
-        try
-        {
-            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "settings.json");
-            return File.Exists(path) && File.ReadAllText(path).Contains("--claude-hook");
-        }
-        catch { return false; }
-    }
-
-    static void AddClaudeItems(IntPtr m)
-    {
-        bool connected = ClaudeConnected(); int shown = 0; DateTime now = DateTime.Now;
+        int shown = 0; DateTime now = DateTime.Now;
         foreach (var kv in agents)
         {
             var a = kv.Value;
             if (a.State.Length == 0) continue;
             string what = a.State == "waiting" ? "needs you" : a.State;
-            AppendMenu(m, GRAY, UIntPtr.Zero, Menuish((a.Project.Length > 0 ? a.Project : "session") + "  -  " + what + "  " + Dur(now - a.Since)));
+            AppendMenu(m, GRAY, UIntPtr.Zero, Menuish(a.Who + (a.Project.Length > 0 ? "  -  " + a.Project : "") + "  -  " + what + "  " + Dur(now - a.Since)));
             shown++;
         }
-        if (shown == 0) AppendMenu(m, GRAY, UIntPtr.Zero, connected ? "No Claude Code activity yet" : "Not connected");
+        if (shown == 0) AppendMenu(m, GRAY, UIntPtr.Zero, "No agent activity yet");
         AppendMenu(m, SEP, UIntPtr.Zero, null);
-        AppendMenu(m, 0, (UIntPtr)(connected ? 51 : 50), connected ? "Disconnect Claude Code" : "Connect Claude Code...");
+        int found = 0;
+        for (int i = 0; i < AgentDefs.All.Length; i++)
+        {
+            string[] sp = AgentDefs.All[i];
+            if (!AgentDefs.Installed(sp)) continue;
+            found++;
+            bool on = AgentDefs.Connected(sp);
+            AppendMenu(m, on ? CHECK : 0, (UIntPtr)(70 + i), (on ? "Disconnect " : "Connect ") + sp[1] + (on ? "" : "..."));
+        }
+        if (found == 0) AppendMenu(m, GRAY, UIntPtr.Zero, "No agent CLIs found on this PC");
     }
 
     // ------------------------------------------------------------------ progress, streaks, achievements, ranks (ideas from AgentPet)
@@ -930,7 +941,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         AppendMenu(m, GRAY, UIntPtr.Zero, "Rank: " + Rank(level) + (next > 0 ? "  (next rank at level " + next + ")" : "  (top rank)"));
         AppendMenu(m, GRAY, UIntPtr.Zero, "Tabs closed: " + closes + "     Pats: " + pats);
         AppendMenu(m, GRAY, UIntPtr.Zero, "Focus sessions: " + focusDone + "     Reminders done: " + remDone);
-        AppendMenu(m, GRAY, UIntPtr.Zero, "Clipboard actions: " + clipActs + "     Claude tasks: " + claudeDone);
+        AppendMenu(m, GRAY, UIntPtr.Zero, "Clipboard actions: " + clipActs + "     Agent tasks: " + claudeDone);
         AppendMenu(m, GRAY, UIntPtr.Zero, "Streak: " + cur + (cur == 1 ? " day" : " days") + "   (best " + bestStreak + ")");
         AppendMenu(m, GRAY, UIntPtr.Zero, "Personality: " + Traits() + "     Together for " + ((DateTime.Today - met).Days + 1) + " days");
         AppendMenu(m, SEP, UIntPtr.Zero, null);
@@ -1052,7 +1063,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (t[0] > 0) bits.Add("closed " + t[0] + (t[0] == 1 ? " doomscroll tab" : " doomscroll tabs"));
         if (t[2] > 0) bits.Add(t[2] + (t[2] == 1 ? " focus session" : " focus sessions"));
         if (t[3] > 0) bits.Add(t[3] + (t[3] == 1 ? " reminder done" : " reminders done"));
-        if (t[5] > 0) bits.Add("Claude finished " + t[5] + (t[5] == 1 ? " task" : " tasks"));
+        if (t[5] > 0) bits.Add("agents finished " + t[5] + (t[5] == 1 ? " task" : " tasks"));
         if (t[1] > 0) bits.Add(t[1] + (t[1] == 1 ? " pat" : " pats"));
         if (t[4] > 0) bits.Add(t[4] + (t[4] == 1 ? " clipboard help" : " clipboard helps"));
         if (bits.Count == 0) return null;
@@ -1073,7 +1084,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         Trait(ref traitLoved, p >= 40, "Loved", "so many pats this week (rosy cheeks!)", announce);
         Trait(ref traitOwl, late >= 3, "a Night owl", "we stayed up late a lot this week", announce);
         Trait(ref traitGuard, c >= 10, "a Guardian", "closed 10+ doomscroll tabs this week", announce);
-        Trait(ref traitBuddy, k >= 20, "Claude's buddy", "Claude finished 20+ tasks this week", announce);
+        Trait(ref traitBuddy, k >= 20, "an Agent buddy", "agents finished 20+ tasks this week", announce);
     }
 
     static void Trait(ref bool field, bool now, string name, string why, bool announce)
@@ -1086,7 +1097,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     {
         var t = new List<string>();
         if (traitFocused) t.Add("Focused"); if (traitLoved) t.Add("Loved"); if (traitOwl) t.Add("Night owl");
-        if (traitGuard) t.Add("Guardian"); if (traitBuddy) t.Add("Claude's buddy");
+        if (traitGuard) t.Add("Guardian"); if (traitBuddy) t.Add("Agent buddy");
         return t.Count == 0 ? "still getting to know you" : string.Join(", ", t.ToArray());
     }
 
@@ -1817,8 +1828,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
         AddDoingItems(dm);
         AppendMenu(m, POPUP, Sub(dm), "What I'm doing");
         IntPtr cm = CreatePopupMenu();
-        AddClaudeItems(cm);
-        AppendMenu(m, POPUP, Sub(cm), "Claude Code");
+        AddAgentItems(cm);
+        AppendMenu(m, POPUP, Sub(cm), "AI agents");
         IntPtr tm = CreatePopupMenu();
         AddToolItems(tm);
         AppendMenu(m, POPUP, Sub(tm), "Tools");
@@ -1866,8 +1877,10 @@ YouTube         | 240 | youtube.com/watch, - youtube
             case 64: ShellExecute(IntPtr.Zero, "open", "notepad.exe", null, null, 1); break;
             case 65: LockWorkStation(); break;
             case 66: ShellExecute(IntPtr.Zero, "open", "notepad.exe", "\"" + MemPath + "\"", null, 1); break;
-            case 50: case 51:
-                ShellExecute(IntPtr.Zero, "open", System.Reflection.Assembly.GetEntryAssembly().Location, cmd == 50 ? "--connect-claude" : "--disconnect-claude", null, 1);
+            case 70: case 71: case 72: case 73: case 74: case 75:
+                string[] sp = AgentDefs.All[cmd - 70];
+                ShellExecute(IntPtr.Zero, "open", System.Reflection.Assembly.GetEntryAssembly().Location,
+                    (AgentDefs.Connected(sp) ? "--disconnect " : "--connect ") + sp[0], null, 1);
                 break;
             case 40: case 41: case 42: case 43: case 44: case 45: Answer(cmd); break;
             case 30: if (sign != null) ReminderDone(); break;
@@ -2678,8 +2691,10 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static int SelfTest()
     {
         var c = Parse(DefaultRules.Split('\n'));
-        int fails = 0;
-        Action<bool> ok = delegate (bool b) { if (!b) fails++; };
+        int fails = 0, checkNo = 0;
+        var log = new StringBuilder();
+        // The exit code is the failure count; this names which checks failed, since a winexe has no console.
+        Action<bool> ok = delegate (bool b) { checkNo++; if (!b) { fails++; log.Append("check #").Append(checkNo).Append(" failed\r\n"); } };
         ok(c.Countdown == 3 && c.Snooze == 5 && !c.Nag && c.Rules.Length == 9 && c.Never.Length == 3);
         ok(Match(c, "instagram.com/reels/abc/", "(8) Instagram", "chrome").Label == "Instagram Reels");   // reels only visible in URL
         ok(Match(c, "", "Crunchyroll - Season 3", "msedge").Label == "Streaming");                         // fullscreen: title only
@@ -2744,8 +2759,18 @@ YouTube         | 240 | youtube.com/watch, - youtube
         DateTime dd0; int[] tt0;
         ok(DecodeDay(EncodeDay(new DateTime(2026, 9, 18), new[] { 3, 5, 2, 1, 0, 4, 1 }), out dd0, out tt0) && dd0 == new DateTime(2026, 9, 18) && tt0[0] == 3 && tt0[5] == 4 && tt0[6] == 1);
         ok(!DecodeDay("junk", out dd0, out tt0));
-        ok(DaySummary(new DateTime(2026, 9, 18), new[] { 3, 0, 2, 0, 0, 1, 1 }) == "Sep 18: closed 3 doomscroll tabs, 2 focus sessions, Claude finished 1 task. Stayed up late.");
+        ok(DaySummary(new DateTime(2026, 9, 18), new[] { 3, 0, 2, 0, 0, 1, 1 }) == "Sep 18: closed 3 doomscroll tabs, 2 focus sessions, agents finished 1 task. Stayed up late.");
         ok(DaySummary(new DateTime(2026, 9, 18), new int[7]) == null);
+        ok(AgentDefs.All.Length == 6 && AgentDefs.Find("antigravity")[3] == "antigravity" && AgentDefs.Find("nope") == null);
+        foreach (var sp in AgentDefs.All)
+        {
+            ok(sp.Length == 5 && sp[0].Length > 0 && sp[1].Length > 0 && sp[2].Contains(".") && sp[4].Contains("=done"));
+            foreach (var pair in sp[4].Split(';'))
+            {
+                string st = pair.Substring(pair.IndexOf('=') + 1);
+                ok(st == "working" || st == "waiting" || st == "done" || st == "end");
+            }
+        }
 
         double px, py;
         SwingPos(0, 100, 50, 0, 200, 100, 0, out px, out py);
@@ -2754,6 +2779,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         ok(px == 200 && py == 100);                                            // u=1: exactly the target
         SwingPos(0, 100, 50, 0, 200, 100, 0.5, out px, out py);
         ok(Math.Abs(px - 75) < 0.001 && py < 100);                             // midpoint: pulled toward the overhead anchor (bezier, not a straight line)
+        try { File.WriteAllText(Path.Combine(Path.GetTempPath(), "pixelpet-selftest.txt"), fails == 0 ? "all " + checkNo + " checks passed\r\n" : log.ToString()); } catch { }
         return fails;
     }
 
@@ -2881,73 +2907,139 @@ YouTube         | 240 | youtube.com/watch, - youtube
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern IntPtr ShellExecute(IntPtr h, string op, string file, string args, string dir, int show);
 }
 
-// ---------------------------------------------------------------------- Claude Code hook installer (runs as `--connect-claude`, its own process)
-// Adds or removes our hook entries in ~/.claude/settings.json. Entries are ours when their command contains
-// "--claude-hook", so other hooks are never touched. The old file is backed up first.
-static class ClaudeSetup
+// ---------------------------------------------------------------------- the agent CLIs we can hook into
+// key | display name | config file under the user profile | file shape | events as "Name=state;..."
+// The state is baked into each hook command, so the pet never has to map event names at runtime.
+static class AgentDefs
 {
-    static readonly string[] Events = { "UserPromptSubmit", "Notification", "Stop", "SessionEnd" };
-
-    public static int Run(bool connect)
+    public static readonly string[][] All =
     {
-        string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "settings.json");
-        string cmd = "\"" + System.Reflection.Assembly.GetEntryAssembly().Location.Replace('\\', '/') + "\" --claude-hook";
-        if (connect && MessageBox(IntPtr.Zero, "PixelPet will add hooks to\n" + path + "\n\nso it can react when Claude Code is working, needs you, or finishes. " +
-            "A backup of the current file is saved next to it. If you move PixelPetFocus.exe later, connect again.\n\nContinue?", "Connect Claude Code", 0x40021) != 1) return 1;
+        new[] { "claude", "Claude Code", @".claude\settings.json", "nested", "UserPromptSubmit=working;Notification=waiting;Stop=done;SessionEnd=end" },
+        new[] { "codex", "Codex", @".codex\hooks.json", "nested", "UserPromptSubmit=working;PermissionRequest=waiting;Stop=done" },
+        new[] { "gemini", "Gemini CLI", @".gemini\settings.json", "nested", "BeforeAgent=working;Notification=waiting;AfterAgent=done;SessionEnd=end" },
+        new[] { "antigravity", "Antigravity", @".gemini\config\hooks.json", "antigravity", "PreInvocation=working;Stop=done" },
+        new[] { "cursor", "Cursor", @".cursor\hooks.json", "cursor", "beforeSubmitPrompt=working;stop=done;sessionEnd=end" },
+        new[] { "windsurf", "Windsurf", @".codeium\windsurf\hooks.json", "windsurf", "pre_user_prompt=working;post_cascade_response=done" },
+    };
+
+    public static string Home { get { return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile); } }
+    public static string PathOf(string[] spec) { return Path.Combine(Home, spec[2]); }
+    public static bool Installed(string[] spec) { return Directory.Exists(Path.Combine(Home, spec[2].Split('\\')[0])); }
+
+    public static string[] Find(string key)
+    {
+        foreach (var a in All) if (a[0] == key) return a;
+        return null;
+    }
+
+    public static bool Connected(string[] spec)
+    {
+        try { string p = PathOf(spec); return File.Exists(p) && File.ReadAllText(p).Contains("--agent-hook"); }
+        catch { return false; }
+    }
+}
+
+// ---------------------------------------------------------------------- hook installer (runs as `--connect <agent>`, its own process)
+// Adds or removes our entries in the agent's config. Entries are ours when their command mentions
+// "--agent-hook" (or the older "--claude-hook"), so other tools' hooks are never touched, and the
+// file is backed up first. This is the only code that needs a JSON parser, and it only ever runs in
+// this separate process, so the pet itself never loads that assembly.
+static class AgentSetup
+{
+    public static int Run(string key, bool connect)
+    {
+        string[] spec = AgentDefs.Find(key);
+        if (spec == null) return 3;
+        string path = AgentDefs.PathOf(spec), exe = System.Reflection.Assembly.GetEntryAssembly().Location;
+        string low = exe.ToLowerInvariant();
+        // Hooks store this exe's full path. From a temp folder they break as soon as that folder is cleaned up.
+        if (connect && (low.Contains("\\temp\\") || low.Contains("\\scratch-workspaces\\") || low.Contains("\\downloads\\")) &&
+            MessageBox(IntPtr.Zero, "PixelPetFocus.exe is running from\n" + Path.GetDirectoryName(exe) +
+            "\n\nThat looks like a temporary or downloads folder. The hooks point at this exact path, so they break if it is moved or cleaned up. " +
+            "Move the exe somewhere permanent first, then connect again.\n\nConnect anyway?", "Connect " + spec[1], 0x40021) != 1) return 1;
+        if (connect && MessageBox(IntPtr.Zero, "PixelPet will add hooks to\n" + path + "\n\nso it can react when " + spec[1] +
+            " is working, needs you, or finishes. A backup of the current file is saved next to it. If you move PixelPetFocus.exe later, connect again.\n\nContinue?",
+            "Connect " + spec[1], 0x40021) != 1) return 1;
         try
         {
-            Apply(path, connect, cmd);
-            MessageBox(IntPtr.Zero, connect ? "Connected. New Claude Code sessions will tell PixelPet when they work, need you, or finish."
-                                            : "Disconnected. PixelPet's hooks were removed from settings.json.", "Claude Code", 0x40040);
+            Apply(key, path, spec[3], spec[4], connect, exe);
+            MessageBox(IntPtr.Zero, connect ? "Connected. New " + spec[1] + " sessions will tell PixelPet when they work, need you, or finish."
+                                            : "Disconnected. PixelPet's hooks were removed from " + Path.GetFileName(path) + ".", spec[1], 0x40040);
             return 0;
         }
         catch (Exception e)
         {
-            MessageBox(IntPtr.Zero, "Couldn't update " + path + ":\n" + e.Message + "\n\nNothing was changed.", "Claude Code", 0x40030);
+            MessageBox(IntPtr.Zero, "Couldn't update " + path + ":\n" + e.Message + "\n\nNothing was changed.", spec[1], 0x40030);
             return 2;
         }
     }
 
-    // The file edit itself, no dialogs (also what the test harness calls on a copy).
-    public static void Apply(string path, bool connect, string cmd)
+    // The file edit itself, no dialogs (also what the test harness calls on copies).
+    public static void Apply(string key, string path, string style, string eventsSpec, bool connect, string exe)
     {
+        var js = new JavaScriptSerializer();
+        bool fresh = !File.Exists(path);
+        var root = fresh ? new Dictionary<string, object>() : js.DeserializeObject(File.ReadAllText(path)) as Dictionary<string, object>;
+        if (root == null) throw new InvalidDataException(Path.GetFileName(path) + " is not a JSON object");
+        string container = style == "antigravity" ? "pixelpet" : "hooks";
+        object got; Dictionary<string, object> map;
+        if (root.TryGetValue(container, out got))
         {
-            var js = new JavaScriptSerializer();
-            Dictionary<string, object> root = File.Exists(path) ? js.DeserializeObject(File.ReadAllText(path)) as Dictionary<string, object> : new Dictionary<string, object>();
-            if (root == null) throw new InvalidDataException("settings.json is not a JSON object");
-            object h; Dictionary<string, object> hooks = null;
-            if (root.TryGetValue("hooks", out h)) { hooks = h as Dictionary<string, object>; if (hooks == null) throw new InvalidDataException("\"hooks\" is not an object"); }
-            else hooks = new Dictionary<string, object>();
-            foreach (var ev in Events)
-            {
-                var groups = new List<object>(); object g;
-                if (hooks.TryGetValue(ev, out g) && g is object[]) foreach (var grp in (object[])g) if (!IsOurs(grp)) groups.Add(grp);
-                if (connect)
-                {
-                    var hook = new Dictionary<string, object>(); hook["type"] = "command"; hook["command"] = cmd;
-                    var group = new Dictionary<string, object>(); group["hooks"] = new object[] { hook };
-                    groups.Add(group);
-                }
-                if (groups.Count > 0) hooks[ev] = groups.ToArray(); else hooks.Remove(ev);
-            }
-            if (hooks.Count > 0) root["hooks"] = hooks; else root.Remove("hooks");
-            Directory.CreateDirectory(Path.GetDirectoryName(path));
-            if (File.Exists(path)) File.Copy(path, path + ".pixelpet-backup", true);
-            File.WriteAllText(path, TextTools.Pretty(js.Serialize(root)) + "\n");
+            map = got as Dictionary<string, object>;
+            if (map == null) throw new InvalidDataException("\"" + container + "\" is not an object");
         }
+        else map = new Dictionary<string, object>();
+
+        foreach (var pair in eventsSpec.Split(';'))
+        {
+            int eq = pair.IndexOf('=');
+            if (eq < 0) continue;
+            string ev = pair.Substring(0, eq), state = pair.Substring(eq + 1);
+            string cmd = "\"" + exe.Replace('\\', '/') + "\" --agent-hook " + key + " " + state;
+            var kept = new List<object>(); object cur;
+            if (map.TryGetValue(ev, out cur) && cur is object[]) foreach (var e in (object[])cur) if (!IsOurs(e)) kept.Add(e);
+            if (connect) kept.Add(Entry(style, ev, cmd));
+            if (kept.Count > 0) map[ev] = kept.ToArray(); else map.Remove(ev);
+        }
+
+        if (map.Count > 0) root[container] = map; else root.Remove(container);
+        if (connect && style == "cursor" && fresh) root["version"] = 1;         // only when we create the file, so disconnect restores it exactly
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        if (File.Exists(path)) File.Copy(path, path + ".pixelpet-backup", true);
+        File.WriteAllText(path, TextTools.Pretty(js.Serialize(root)) + "\n");
     }
 
-    static bool IsOurs(object grp)
+    // Claude/Codex/Gemini wrap handlers in a group; Antigravity does that only for tool events; Cursor and
+    // Windsurf list handlers directly.
+    static object Entry(string style, string ev, string cmd)
     {
-        var d = grp as Dictionary<string, object>; object inner;
-        if (d == null || !d.TryGetValue("hooks", out inner) || !(inner is object[])) return false;
+        var handler = new Dictionary<string, object>();
+        if (style != "windsurf") handler["type"] = "command";
+        handler["command"] = cmd;
+        if (style == "cursor" || style == "windsurf" || (style == "antigravity" && ev != "PreToolUse" && ev != "PostToolUse")) return handler;
+        var group = new Dictionary<string, object>();
+        if (style == "antigravity") group["matcher"] = "*";
+        group["hooks"] = new object[] { handler };
+        return group;
+    }
+
+    static bool IsOurs(object entry)
+    {
+        var d = entry as Dictionary<string, object>;
+        if (d == null) return false;
+        object c;
+        if (d.TryGetValue("command", out c) && c is string && Mine((string)c)) return true;
+        object inner;
+        if (!d.TryGetValue("hooks", out inner) || !(inner is object[])) return false;
         foreach (var x in (object[])inner)
         {
-            var hd = x as Dictionary<string, object>; object c;
-            if (hd != null && hd.TryGetValue("command", out c) && c is string && ((string)c).Contains("--claude-hook")) return true;
+            var hd = x as Dictionary<string, object>;
+            if (hd != null && hd.TryGetValue("command", out c) && c is string && Mine((string)c)) return true;
         }
         return false;
     }
+
+    static bool Mine(string command) { return command.Contains("--agent-hook") || command.Contains("--claude-hook"); }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int MessageBox(IntPtr h, string text, string caption, uint type);
 }
