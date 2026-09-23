@@ -22,6 +22,21 @@ PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no de
 - It takes naps and follows your cursor with its eyes.
 - **Curious visits:** every few minutes it hops onto (or walks under) the window you're using and reacts to what it is: code editors, terminals, GitHub, docs, mail, chat, video, music, games, shopping and more. Sometimes it asks "What are you up to?". Click it to answer from a quick menu (Working, Studying, Taking a break, Just browsing, Leave me alone). If you say you're working it gets quieter, and it nudges you if you drift to video or social media. It stays silent during meetings and focus sessions. It only uses the app name, window title and URL it already reads; nothing is captured or sent anywhere (`curious = no` turns it off).
 - Clicking it counts as a pat and gives XP; closing a doomscroll tab, finishing reminders and Claude Code finishing a task give XP too. Your level is saved.
+- **It dresses for the moment.** Little hats and props appear when they fit what's happening, drawn in the same pixel style:
+
+  | You see | It means |
+  | --- | --- |
+  | Explorer hat and telescope | It has spotted a doomscrolling window and is watching the clock run down |
+  | Detective hat and magnifying glass | It came over to see what you're working on |
+  | Lab cap and bubbling flask | A coding agent is busy working |
+  | Coffee mug | You're in a focus session |
+  | Briefcase / map | You answered "Working" / "Studying" |
+  | Idea bulbs | You copied something it can help with |
+  | Paw on chin | It's asking what you're up to |
+  | Wizard hat and wand | You just levelled up or unlocked an achievement |
+  | Parachute | It's falling a long way, and floats down gently |
+
+  `costumes = no` turns them off.
 - **It evolves as it levels up:** Hatchling, then Companion at level 5 (a sprout), Scout at 10 (an explorer cap), Hero at 20 (a headband) and Legend at 35 (a crown). Hats step aside when it's wearing headphones.
 - **14 achievements and a stats card.** **Stats & achievements** in the menu shows tabs closed, pats, focus sessions, reminders done, clipboard actions, Claude tasks and your daily streak, plus which achievements you've unlocked.
 - **Memories and habits:** it keeps a memory book of the moments you shared: the day you met, level-ups, achievements, best streaks, and a quiet one-line summary of each day ("Sep 18: closed 3 doomscroll tabs, 2 focus sessions..."). **Memories** in the menu shows the latest; **Open memory book...** shows them all.
@@ -137,6 +152,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
 | `webtravel` | `yes` | Web-swing to the cursor (restart to apply) |
 | `curious` | `yes` | Visit your window, comment, ask what you're doing |
 | `agents` | `yes` | React to coding agents (after connecting them from the menu). `claude` still works as the old name |
+| `costumes` | `yes` | Hats and props for the moment (telescope, flask, wizard, parachute...) |
 | `stretch` | `90` | Minutes of non-stop activity before a stretch nudge (`0` = off) |
 | `push` | `yes` | Nudge windows around; throw the pet into a window to knock it aside |
 | `quiet` | `no` | `yes` = barely talks (keeps only the important messages) |

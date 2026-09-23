@@ -19,6 +19,7 @@ class Cfg
     public int Countdown = 3, Snooze = 5, Focus = 25, Break = 5, Stretch = 90;
     public bool Claude = true, Push = true, Quiet;
     public string ClipKey = "ctrl+alt+shift+c", SwingKey = "ctrl+alt+shift+w";
+    public bool Costumes = true;
     public bool Nag, Wander = true, Sleepy = true, Typing = true, EnterRope = true, Climb = true, Audio = true, Clipboard = true, Hotkey = true, Curious = true, WebTravel = true;
     public double Size = 1;
     public string[] Never = new string[0];
@@ -59,6 +60,7 @@ break = 5          # break minutes
 stretch = 90       # nudge to stretch after this many minutes of non-stop activity (0 = off)
 agents = yes       # reacts when a coding agent (Claude Code, Codex, Gemini, Antigravity...) works, needs you, or finishes
 push = yes         # nudges windows around like furniture now and then; throw it at a window to knock it aside
+costumes = yes     # hats and props for the moment: telescope, detective glass, lab flask, wizard, parachute...
 quiet = no         # yes = barely talks: still visits and reacts, keeps chit-chat to a minimum
 
 # Never touch: any window containing one of these is left alone
@@ -130,6 +132,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                     case "claude": case "agents": c.Claude = yes; break;
                     case "push": c.Push = yes; break;
                     case "quiet": c.Quiet = yes; break;
+                    case "costumes": c.Costumes = yes; break;
                     case "mode": c.Nag = v == "nag"; break;
                     case "wander": c.Wander = yes; break;
                     case "sleepy": c.Sleepy = yes; break;
@@ -237,6 +240,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static string doing = ""; static DateTime doingUntil;
     // movie night: the flavour guessed from the title, a slow average of the volume to spot jump scares, and timers
     static string movieGenre = ""; static double movieAvg, movieCool, movieChat = 15, movieLoud, movieQuiet, scaredT;
+    static double detectiveT, wizardT, paraT; static bool eyeingNow, agentBusy;   // what the pet is dressed for
     static string clipKeyText = "", swingKeyText = "";                        // the shortcuts that actually registered
     static readonly string[] ClipFallbacks = { "ctrl+alt+shift+c", "ctrl+shift+f10", "ctrl+alt+r" };
     static readonly string[] SwingFallbacks = { "ctrl+alt+shift+w", "ctrl+shift+f11", "ctrl+alt+g" };
@@ -390,6 +394,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         double dt = Math.Min(0.1, (now - lastTick) / 1000.0); lastTick = now;
         animT += dt; stateT += dt;
         chargeT = Math.Max(0, chargeT - dt);
+        detectiveT = Math.Max(0, detectiveT - dt); wizardT = Math.Max(0, wizardT - dt); paraT = Math.Max(0, paraT - dt);
         clipOfferT -= dt; curiousT -= dt; askT -= dt;
         joyT = Math.Max(0, joyT - dt); angryT = Math.Max(0, angryT - dt); sqT = Math.Max(0, sqT - dt); bubbleT -= dt;
         blinkT -= dt; blinkOn -= dt;
@@ -423,6 +428,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (b != null && alert == null && state != HELD) BeginAlert(b);
         if (orient != 0 && sign != null && state != AIR && state != HELD) LetGo(null);   // come down to show the sign
         bool eyeing = alert == null && wr > 0 && wr <= 5;                       // it notices before it acts
+        eyeingNow = eyeing;
         if (eyeing && state == WALK) SetState(SIT, 2);
 
         if (clipRetry > 0) ReadClipboard(true);
@@ -851,6 +857,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
             else if (a.State == "waiting" && now - a.Since < TimeSpan.FromMinutes(3)) { waiting++; waitWho = a.Who; }
         }
         if (stale != null) foreach (var k in stale) agents.Remove(k);
+        agentBusy = working > 0;
         if (!cfg.Claude) return null;
         if (waiting == 1) return waitWho + " needs you";
         if (waiting > 1) return waiting + " agents need you";
@@ -937,7 +944,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
             if ((ach & (1 << i)) != 0 || !AchMet(i)) continue;
             ach |= 1 << i;
             Remember("Unlocked \"" + AchNames[i] + "\": " + AchHow[i]);
-            Say("Achievement: " + AchNames[i] + "!", 4); joyT = 2.5; Hearts(5); MessageBeep(0x40);
+            Say("Achievement: " + AchNames[i] + "!", 4); joyT = 2.5; Hearts(5); MessageBeep(0x40); wizardT = 5;
             SaveProgress();
             return;                                                              // one at a time; the next shows on the next event
         }
@@ -1020,6 +1027,80 @@ YouTube         | 240 | youtube.com/watch, - youtube
             return;
         }
         Say("Couldn't register a shortcut for " + setting + ": every choice is taken. Pick another in the settings.", 7);
+    }
+
+    // ------------------------------------------------------------------ costumes: a hat and a prop for the moment
+    // 1 explorer + telescope, 2 detective, 3 lab flask, 4 wizard, 5 parachute, 6 briefcase, 7 coffee, 8 map, 9 thinking, 10 ideas
+    static int Costume()
+    {
+        if (!cfg.Costumes || state == HELD || alert != null || sign != null) return 0;
+        if (paraT > 0 && state == AIR) return 5;
+        if (wizardT > 0) return 4;
+        if (askT > 0) return 9;
+        if (clipOfferT > 0 && clipText != null) return 10;
+        if (detectiveT > 0 && (state == SIT || state == WALK)) return 2;
+        if (eyeingNow) return 1;
+        if (state != SIT) return 0;                                              // the rest are sitting-still props
+        if (agentBusy) return 3;
+        if (focusPhase == 1) return 7;
+        if (doing == "study") return 8;
+        if (doing == "work") return 6;
+        return 0;
+    }
+
+    static void DrawCostume(int dy, int body, int c)
+    {
+        int f = facing > 0 ? 1 : -1;
+        double side = f > 0 ? 11.6 : -1.6;                                       // where a held prop sits
+        switch (c)
+        {
+            case 1:                                                              // explorer hat and a telescope
+                Px(1.6, dy - 0.7, 10.8, 0.6, PAPER); Px(3.4, dy - 2.2, 7.2, 1.6, PAPER); Px(3.4, dy - 1.1, 7.2, 0.45, ANGRY);
+                Px(f > 0 ? 9.8 : -1.8, dy + 2.1, 6, 1.1, DARK);
+                Px(f > 0 ? 15.4 : -2.6, dy + 1.9, 0.9, 1.5, PAPER);
+                break;
+            case 2:                                                              // detective hat and magnifying glass
+                Px(2.6, dy - 1.5, 8.8, 1.2, DARK); Px(1.4, dy - 0.4, 11.2, 0.5, DARK);
+                Px(side, dy + 1.6, 2.8, 2.8, DARK); Px(side + 0.5, dy + 2.1, 1.8, 1.8, PAPER);
+                Px(f > 0 ? side + 1 : side + 0.8, dy + 4.4, 0.6, 1.6, ROPE);
+                break;
+            case 3:                                                              // lab cap and a bubbling flask
+                Px(3.2, dy - 1.5, 7.6, 1.5, WHITE); Px(3.8, dy - 2.1, 6.4, 0.7, WHITE);
+                Px(side + 0.2, dy + 3.4, 2.4, 0.6, WHITE); Px(side + 0.5, dy + 2.6, 1.8, 0.9, PINK);
+                Px(side + 1, dy + 1.4, 0.8, 1.3, WHITE);
+                if ((int)(animT * 3) % 2 == 0) Px(side + 1.1, dy + 0.4, 0.6, 0.6, PINK);
+                break;
+            case 4:                                                              // wizard hat and wand
+                Px(6.2, dy - 4, 1.6, 1, CAP); Px(5.4, dy - 3, 3.2, 1, CAP); Px(4.6, dy - 2, 4.8, 1, CAP);   // a proper point
+                Px(3.4, dy - 1, 7.2, 0.7, PAPER);
+                Px(6.8, dy - 2.8, 0.7, 0.7, STAR);                                   // a star on the hat
+                Px(f > 0 ? 11.8 : -1.4, dy + 1.6, 2.6, 0.45, ROPE);
+                Px(f > 0 ? 14.2 : -1.8, dy + 0.9, 1, 1, STAR);
+                break;
+            case 5:                                                              // parachute
+                Px(4.2, dy - 8, 5.6, 1, CAP); Px(2.8, dy - 7, 8.4, 1, CAP); Px(1.8, dy - 6, 10.4, 1, CAP);   // domed canopy
+                Px(4.4, dy - 7, 1.5, 1, WHITE); Px(8.1, dy - 7, 1.5, 1, WHITE);
+                Px(2.2, dy - 5, 0.35, 4.2, DARK); Px(7, dy - 5, 0.35, 4.2, DARK); Px(11.5, dy - 5, 0.35, 4.2, DARK);
+                break;
+            case 6: Px(side, dy + 4.2, 2.6, 2, DARK); Px(side + 0.8, dy + 3.6, 1, 0.6, DARK); break;   // briefcase
+            case 7:                                                              // coffee
+                Px(side, dy + 3.6, 2, 1.9, WHITE); Px(side + 2, dy + 4, 0.5, 0.9, WHITE); Px(side + 0.25, dy + 3.75, 1.5, 0.5, ROPE);
+                if ((int)(animT * 2) % 2 == 0) Px(side + 0.8, dy + 2.6, 0.5, 0.7, WHITE);
+                break;
+            case 8:                                                              // a map held up
+                Px(3.2, dy + 3.2, 7.6, 3.6, PAPER); Px(6.8, dy + 3.2, 0.3, 3.6, INK);
+                Px(4.2, dy + 4.2, 0.8, 0.8, ANGRY); Px(8.6, dy + 5.4, 0.8, 0.8, GREEN); Px(5.4, dy + 5.6, 0.7, 0.7, CAP);
+                break;
+            case 9: Px(f > 0 ? 9.6 : 2.6, dy + 3.4, 1.8, 1.3, body); break;      // paw to the chin, thinking
+            case 10:                                                             // ideas popping overhead
+                Bulb(2.4, dy - 2.6, STAR); Bulb(6.4, dy - 3.4, GREEN); Bulb(10.2, dy - 2.6, PINK);
+                break;
+        }
+    }
+
+    static void Bulb(double col, double row, int colour)
+    {
+        Px(col, row, 1.2, 1.3, colour); Px(col + 0.3, row + 1.3, 0.6, 0.4, DARK);
     }
 
     // ------------------------------------------------------------------ quiet mode
@@ -1369,7 +1450,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         curiousAsk = !cfg.Quiet && doing.Length == 0 && (act.Length == 0 || (changed && rnd.NextDouble() < 0.5));
         curiousLine = curiousAsk ? "What are you up to?  (click me)" : TextTools.Comment(act, doing, rnd);
         if (curiousLine == null) return false;
-        curiousAt = now;
+        curiousAt = now; detectiveT = 8;                                         // out comes the magnifying glass
         if (!JumpOntoWindow())                                                  // hop onto its title bar, or walk underneath it
         {
             RECT r;
@@ -1624,6 +1705,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (x < minX) { x = minX; vx = -vx * 0.5; }
         if (x > maxX) { x = maxX; vx = -vx * 0.5; }
         if (y < wa.T + 10 * U) { y = wa.T + 10 * U; if (vy < 0) vy = 0; }
+        if (cfg.Costumes && vy > 700 * S && wa.B - y > 22 * U) paraT = 4;        // long drop: out comes the parachute
+        if (paraT > 0 && vy > 240 * S) vy = 240 * S;                             // ...and it floats down
         if (vy <= 0) return;
 
         // sample just below our own window so we see what is underneath the feet
@@ -1762,6 +1845,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         {
             string was = Rank(level - gained);
             Say(Rank(level) != was ? "Level " + level + "! Evolved into a " + Rank(level) + "!" : "Level " + level + "!", 3.5);
+            wizardT = 5;                                                         // wizard hat for the level-up sparkle
             joyT = 3; Hearts(6);
             Remember("Grew to level " + level + (Rank(level) != was ? " and became a " + Rank(level) : ""));
             CheckAch();
@@ -2680,7 +2764,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
         else if (angry) { Px(3.5 + lookX, 2 + dy, 1, 1, EYE); Px(4.5 + lookX, 3 + dy, 1, 1, EYE); Px(9.5 + lookX, 2 + dy, 1, 1, EYE); Px(8.5 + lookX, 3 + dy, 1, 1, EYE); }
         else { Px(4 + lookX, 2 + lookY + dy, 1, 2, EYE); Px(9 + lookX, 2 + lookY + dy, 1, 2, EYE); }
 
-        DrawRank(dy, wasPhones);
+        int costume = Costume();
+        DrawRank(dy, wasPhones || costume != 0);
+        DrawCostume(dy, body, costume);
         DrawTraits(dy);
         if (wasPhones)
         {
@@ -2829,6 +2915,12 @@ YouTube         | 240 | youtube.com/watch, - youtube
         ok(!DecodeDay("junk", out dd0, out tt0));
         ok(DaySummary(new DateTime(2026, 9, 18), new[] { 3, 0, 2, 0, 0, 1, 1 }) == "Sep 18: closed 3 doomscroll tabs, 2 focus sessions, agents finished 1 task. Stayed up late.");
         ok(DaySummary(new DateTime(2026, 9, 18), new int[7]) == null);
+        cfg = new Cfg();
+        ok(Costume() == 0);                                                      // nothing on by default at rest
+        wizardT = 1; ok(Costume() == 4); wizardT = 0;
+        askT = 1; ok(Costume() == 9); askT = 0;
+        eyeingNow = true; ok(Costume() == 1); eyeingNow = false;
+        cfg.Costumes = false; wizardT = 1; ok(Costume() == 0); wizardT = 0; cfg.Costumes = true;
         uint mk, kk;
         ok(TextTools.ParseHotkey("ctrl+alt+shift+c", out mk, out kk) && mk == 7 && kk == 0x43 && TextTools.HotkeyText(mk, kk) == "Ctrl+Alt+Shift+C");
         ok(TextTools.ParseHotkey("Ctrl+Shift+F10", out mk, out kk) && mk == 6 && kk == 0x79 && TextTools.HotkeyText(mk, kk) == "Ctrl+Shift+F10");
