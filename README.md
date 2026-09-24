@@ -208,6 +208,8 @@ Measured on a Windows 11 laptop: **3-5 MB private working set** and **about 0-1 
 
 ## Credits
 
+Designed and built by [Samuvel Johnson](https://github.com/samuveljohnson1416).
+
 PixelPet Focus is a native rewrite inspired by [BadKat / FocusCat](https://github.com/X-DIABLO-X/badkat) by X-DIABLO-X (MIT licensed). The default rule set and the approach of matching URL, title and process with a grace time per site come from that project. Its license notice is included in [LICENSE](LICENSE).
 
 The Claude Code status, evolution stages, achievements and break reminder were inspired by [AgentPet](https://github.com/ntd4996/agentpet) by Nguyễn Thành Đạt (MIT licensed). The features were reimplemented from scratch; no AgentPet code is included.
