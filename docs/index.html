@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PixelPet Focus — a desktop pet that closes your doomscrolling tab</title>
+<meta name="description" content="A 115 KB Windows desktop pet that walks on your windows, reacts to your coding agents, and closes your doomscrolling tabs. About 4 MB of RAM, no installer, works offline.">
+<meta property="og:title" content="PixelPet Focus">
+<meta property="og:description" content="A tiny pixel pet that lives on your taskbar and closes your doomscrolling tabs. 115 KB, ~4 MB RAM, no installer.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 9'%3E%3Crect x='2' width='10' height='7' fill='%23D97757'/%3E%3Crect y='4' width='2' height='2' fill='%23D97757'/%3E%3Crect x='12' y='4' width='2' height='2' fill='%23D97757'/%3E%3Crect x='3' y='7' width='1' height='2' fill='%23D97757'/%3E%3Crect x='5' y='7' width='1' height='2' fill='%23D97757'/%3E%3Crect x='8' y='7' width='1' height='2' fill='%23D97757'/%3E%3Crect x='10' y='7' width='1' height='2' fill='%23D97757'/%3E%3Crect x='4' y='2' width='1' height='2' fill='%23141414'/%3E%3Crect x='9' y='2' width='1' height='2' fill='%23141414'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --pet:#D97757;          /* the pet itself */
+    --desk:#1E1E22;         /* desktop behind everything */
+    --bar:#141416;          /* taskbar */
+    --paper:#F0F5F5;        /* the app's window colour */
+    --ink:#23232a;
+    --muted:#5d5d6b;
+    --star:#FFD830;
+    --grass:#50C850;
+    --berry:#FF5F87;
+    --line:#23232a;
+    --mono:"Cascadia Mono","Cascadia Code",Consolas,"DejaVu Sans Mono",monospace;
+    --sans:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--desk);color:var(--paper);font:400 17px/1.6 var(--sans)}
+  .wrap{max-width:960px;margin:0 auto;padding:0 16px}
+  a{color:inherit}
+
+  /* ---------- hero: a desktop with the pet standing on the taskbar ---------- */
+  .hero{position:relative;padding:76px 0 0;overflow:hidden}
+  h1{font:700 clamp(34px,6.4vw,64px)/1.05 var(--mono);letter-spacing:-.02em;margin:0 0 18px}
+  h1 .cursor{display:inline-block;width:.55ch;height:.92em;background:var(--pet);vertical-align:-.08em;animation:blink 1.1s steps(1,end) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .lede{font-size:clamp(18px,2.4vw,22px);line-height:1.5;max-width:58ch;color:#cfd3d8;margin:0 0 30px}
+  .get{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:14px}
+  .btn{display:inline-block;background:var(--pet);color:#1b1109;font:700 17px/1 var(--mono);
+       padding:16px 22px;text-decoration:none;border:2px solid #10100f;box-shadow:4px 4px 0 #10100f}
+  .btn:hover{transform:translate(2px,2px);box-shadow:2px 2px 0 #10100f}
+  .btn:active{transform:translate(4px,4px);box-shadow:0 0 0 #10100f}
+  .btn.ghost{background:transparent;color:var(--paper);border-color:#4a4a55;box-shadow:none}
+  .btn.ghost:hover{border-color:var(--paper);transform:none}
+  .spec{font:400 14px/1.7 var(--mono);color:#9aa0aa;margin:0 0 42px}
+  .spec b{color:var(--paper);font-weight:600}
+
+  .stage{position:relative;height:150px}
+  .pet{position:absolute;bottom:0;left:0;width:104px;animation:walkin 1.5s ease-out both}
+  .pet .blinkeye{animation:eyes 5.5s infinite}
+  @keyframes walkin{from{transform:translateX(-140px)}to{transform:translateX(24px)}}
+  @keyframes eyes{0%,96%{opacity:1}97%,99%{opacity:0}100%{opacity:1}}
+  .bubble{position:absolute;bottom:104px;left:96px;background:var(--paper);color:var(--ink);
+          border:2px solid #10100f;border-radius:10px;padding:9px 13px;font:600 15px/1.2 var(--sans);
+          animation:pop .3s .9s both}
+  .bubble:after{content:"";position:absolute;left:16px;bottom:-9px;width:10px;height:10px;background:var(--paper);
+          border-right:2px solid #10100f;border-bottom:2px solid #10100f;transform:rotate(45deg)}
+  @keyframes pop{from{opacity:0;transform:translateY(6px) scale(.94)}to{opacity:1}}
+  .taskbar{height:44px;background:var(--bar);border-top:1px solid #2c2c33;display:flex;align-items:center;gap:10px;padding:0 14px}
+  .taskbar span{width:26px;height:26px;border-radius:5px;background:#2a2a31}
+  .taskbar span:first-child{background:var(--pet);opacity:.85}
+
+  /* ---------- sections as little windows ---------- */
+  section{padding:56px 0 8px}
+  h2{font:700 clamp(22px,3vw,28px)/1.2 var(--mono);margin:0 0 6px}
+  .sub{color:#a7adb6;margin:0 0 26px;max-width:62ch}
+  .grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(272px,1fr))}
+  .win{background:var(--paper);color:var(--ink);border:2px solid #10100f;border-radius:8px;overflow:hidden}
+  .win .bar{display:flex;align-items:center;gap:7px;background:#dfe6e6;border-bottom:2px solid #10100f;padding:7px 10px;
+            font:600 13px/1 var(--mono);color:#33333c}
+  .win .dot{width:9px;height:9px;border-radius:2px;background:#b9c2c2;border:1px solid #8e9898}
+  .win .dot.close{background:var(--pet);border-color:#a85a3f}
+  .win p{margin:0;padding:14px 16px 16px;font-size:15.5px;line-height:1.55;color:#3a3a45}
+  .win p b{color:var(--ink)}
+
+  ol.steps{counter-reset:s;list-style:none;margin:0;padding:0;max-width:64ch}
+  ol.steps li{counter-increment:s;position:relative;padding:0 0 18px 42px;color:#cfd3d8}
+  ol.steps li:before{content:counter(s);position:absolute;left:0;top:-2px;width:26px;height:26px;
+       display:grid;place-items:center;background:var(--pet);color:#1b1109;font:700 14px/1 var(--mono);border-radius:4px}
+  code{font:500 14.5px/1.5 var(--mono);background:#2a2a31;padding:2px 6px;border-radius:4px;color:#ecd9c9}
+
+  .agents{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px;padding:0;list-style:none}
+  .agents li{font:600 14px/1 var(--mono);border:1px solid #3c3c46;border-radius:999px;padding:9px 13px;color:#d7dbe0}
+  .agents li:nth-child(3n+1){border-color:var(--pet)}
+  .agents li:nth-child(3n+2){border-color:var(--grass)}
+  .agents li:nth-child(3n+3){border-color:var(--star)}
+
+  footer{margin-top:64px;border-top:1px solid #2c2c33;padding:26px 0 60px;color:#8c93a0;font-size:14.5px}
+  footer a{color:#cfd3d8}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.pet{transform:translateX(24px)}}
+  @media (max-width:560px){.stage{height:126px}.pet{width:86px}.bubble{left:84px;bottom:88px;font-size:14px}}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>It closes the tab<br>you shouldn't be on<span class="cursor"></span></h1>
+    <p class="lede">PixelPet Focus is a pixel creature that lives on your Windows taskbar. It watches the window in front of you, and when Shorts or Reels outstay their welcome it walks over, glares, and shuts the tab. The rest of the day it naps, climbs your screen edges and keeps you company.</p>
+    <div class="get">
+      <a class="btn" href="https://github.com/samuveljohnson1416/pixelpet/releases/latest">Download for Windows</a>
+      <a class="btn ghost" href="https://github.com/samuveljohnson1416/pixelpet">Read the source</a>
+    </div>
+    <p class="spec">One <b>115 KB</b> exe · about <b>4 MB</b> of memory · no installer, no dependencies · <b>never touches the network</b></p>
+  </div>
+  <div class="wrap">
+    <div class="stage">
+      <div class="bubble">Shorts. Again?</div>
+      <svg class="pet" viewBox="0 0 14 9" shape-rendering="crispEdges" aria-label="the pixel pet" role="img">
+        <rect x="2" y="0" width="10" height="7" fill="#D97757"/>
+        <rect x="0" y="4" width="2" height="2" fill="#D97757"/>
+        <rect x="12" y="4" width="2" height="2" fill="#D97757"/>
+        <rect x="3" y="7" width="1" height="2" fill="#D97757"/>
+        <rect x="5" y="7" width="1" height="2" fill="#D97757"/>
+        <rect x="8" y="7" width="1" height="2" fill="#D97757"/>
+        <rect x="10" y="7" width="1" height="2" fill="#D97757"/>
+        <g class="blinkeye">
+          <rect x="4" y="2" width="1" height="2" fill="#141414"/>
+          <rect x="9" y="2" width="1" height="2" fill="#141414"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <div class="taskbar"><span></span><span></span><span></span><span></span></div>
+</header>
+
+<main>
+<section class="wrap">
+  <h2>What it does all day</h2>
+  <p class="sub">Every behaviour below runs on your machine, from things Windows already tells it: the title of your window, the app it belongs to, the address in your browser's bar.</p>
+  <div class="grid">
+    <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>patrol</div>
+      <p>Each site gets its own leash: <b>6 seconds</b> for Shorts, Reels and TikTok, 90 for Reddit, 4 minutes for ordinary YouTube. Run over the limit and the pet walks across, counts down, and presses Ctrl+W. Click it during the countdown and it lets you off.</p></div>
+    <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>your windows</div>
+      <p>It jumps onto title bars and rides along when you drag them, climbs the screen edges, hangs upside-down from the top, and shoves a window aside if you throw it hard enough.</p></div>
+    <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>company</div>
+      <p>It pulls out a laptop while you type, wears headphones when you plug them in, bops to music, grabs popcorn and a drink for movie night, and reacts to your charger.</p></div>
+    <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>clipboard</div>
+      <p>Copy "call mom in 20 min" and it offers to remember it. It also strips tracking junk from links and works out sums. Anything that looks like a password or a one-time code is ignored outright.</p></div>
+    <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>growing up</div>
+      <p>Closed tabs and finished reminders earn XP. It levels up, evolves, unlocks achievements, and writes a one-line memory of each day. A week of focus sessions earns it a pair of study glasses.</p></div>
+    <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>tools</div>
+      <p>Battery, free disk space, memory and uptime in one menu, with a system check and one-click Screenshot, Task Manager or Lock PC. It warns you the day your C: drive gets tight.</p></div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>It watches your coding agents too</h2>
+  <p class="sub">Connect an agent in one click and the pet shows a working timer, runs to your cursor when the agent needs permission, and cheers when a task lands.</p>
+  <ul class="agents">
+    <li>Claude Code</li><li>Codex</li><li>Gemini CLI</li><li>Antigravity</li><li>Cursor</li><li>Windsurf</li>
+  </ul>
+  <p class="sub">It registers its own hooks in that agent's config, backs the file up first, and leaves every other hook alone.</p>
+</section>
+
+<section class="wrap">
+  <h2>Install it in three steps</h2>
+  <ol class="steps">
+    <li>Download <code>PixelPetFocus.exe</code> from the <a href="https://github.com/samuveljohnson1416/pixelpet/releases/latest">latest release</a> and put it somewhere permanent, like <code>C:\Apps\PixelPet</code>.</li>
+    <li>Double-click it. There is no installer. Windows will warn you about an unsigned app: choose <b>More info</b>, then <b>Run anyway</b>.</li>
+    <li>Right-click the pet for its menu. Tick <b>Start with Windows</b> if you want it there every morning.</li>
+  </ol>
+  <p class="sub">Needs 64-bit Windows 10 or 11. Everything it runs on already ships with Windows.</p>
+</section>
+
+<section class="wrap">
+  <h2>What it never does</h2>
+  <div class="grid">
+    <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>no network</div>
+      <p>There is no networking code in the app at all. No accounts, no telemetry, no update checks. Unplug your internet and nothing changes.</p></div>
+    <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>no keylogging</div>
+      <p>To know you're typing it checks that input happened while the mouse sat still. It never records which keys you press, and there is no keyboard hook.</p></div>
+    <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>nothing saved</div>
+      <p>Copied text stays in memory and is never written to disk. Settings, XP and reminders live in plain text files you can read and edit yourself.</p></div>
+  </div>
+</section>
+</main>
+
+<footer class="wrap">
+  <p><a href="https://github.com/samuveljohnson1416/pixelpet">Source on GitHub</a> · <a href="https://github.com/samuveljohnson1416/pixelpet/releases/latest">Releases</a> · MIT licensed · a native rewrite inspired by <a href="https://github.com/X-DIABLO-X/badkat">BadKat</a></p>
+  <p>The pet's look is a fan tribute to the Claude Code mascot. This is an unofficial personal project, not affiliated with or endorsed by Anthropic.</p>
+</footer>
+
+</body>
+</html>

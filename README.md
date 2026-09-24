@@ -2,6 +2,8 @@
 
 A tiny pixel pet for your Windows desktop. It walks over and closes your doomscrolling tab.
 
+**[Download the latest release](https://github.com/samuveljohnson1416/pixelpet/releases/latest)** · [Website](https://samuveljohnson1416.github.io/pixelpet/)
+
 PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no dependencies. It is written in C# against raw Win32 and GDI, and compiled with the C# compiler that ships with Windows.
 
 ## What it does
