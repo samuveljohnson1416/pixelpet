@@ -247,6 +247,8 @@ GitHub Actions builds every push on Windows and on a Mac, runs both self-tests, 
 
 Measured on a Windows 11 laptop: **3-5 MB private working set** and **about 0-1 % CPU**. The pet is a layered window drawn with GDI at 30 fps. There's no WinForms, WPF or WebView.
 
+On a Mac, measured by the CI run on GitHub's macOS runner: **about 10.3 MB** in Activity Monitor's Memory column (`phys_footprint`) once it's running, including after a web-swing. AppKit alone accounts for 6.4 MB of that, before the pet draws anything; the pet's window, text drawing and Core Audio make up the rest. The runner's screen isn't Retina, so expect a little more on a MacBook's display. Each CI run prints this breakdown stage by stage, so a change that costs memory shows up right away.
+
 ## Credits
 
 Designed and built by [Samuvel Johnson](https://github.com/samuveljohnson1416).
