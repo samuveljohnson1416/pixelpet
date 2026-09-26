@@ -117,7 +117,7 @@ Settings and progress are saved in `%APPDATA%\PixelPet Focus`. To have it start 
    xattr -dr com.apple.quarantine "/Applications/PixelPet Focus.app"
    ```
 
-4. The pet appears above the Dock, and a small pet icon appears in the menu bar. On the first launch macOS asks to allow it in **Accessibility**. Say yes if you want it to read window titles, ride and push windows, and close apps. It works without it, just with less to go on.
+4. The pet appears above the Dock. Right-click it for the menu; while it's hidden, a small pet icon in the menu bar has the same menu. On the first launch macOS asks to allow it in **Accessibility**. Say yes if you want it to read window titles, ride and push windows, and close apps. It works without it, just with less to go on.
 
 Settings and progress are saved in `~/Library/Application Support/PixelPet Focus`. **Open at login** in its menu adds a LaunchAgent (`~/Library/LaunchAgents/io.github.samuveljohnson1416.pixelpet.plist`).
 
@@ -131,7 +131,7 @@ Everything above works the same, with these differences:
 - **Firefox and Zen** don't let other apps read their address bar, so rules match their window titles only, and the pet closes a tab with the same Cmd+W you would press.
 - **Movie night reactions:** macOS won't let an app read the system's sound level without a screen-recording permission, so the jump-scare and loud-scene reactions are Windows-only. Popcorn, sipping, and the chatter in the mood of the film all work. Likewise the music dance follows a steady beat rather than the song.
 - **Settings...** opens `rules.txt` in TextEdit instead of a settings window. Changes apply within a second of saving.
-- The menu bar icon replaces the tray icon, **Open at login** replaces **Start with Windows**, and the Tools menu opens Screenshot, Activity Monitor, Calculator and TextEdit.
+- There's no tray: right-click the pet for the menu, and while the pet is hidden a menu bar icon appears with the same menu. **Open at login** replaces **Start with Windows**, and the Tools menu opens Screenshot, Activity Monitor, Calculator and TextEdit.
 - Shortcuts use the Mac keys: `ctrl+alt+shift+c` is Control+Option+Shift+C. You can use `cmd` in `clipkey` and `swingkey`.
 
 ## How to use

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PixelPet Focus — a desktop pet that closes your doomscrolling tab</title>
-<meta name="description" content="A 115 KB Windows desktop pet that walks on your windows, reacts to your coding agents, and closes your doomscrolling tabs. About 4 MB of RAM, no installer, works offline.">
+<meta name="description" content="A pixel desktop pet for Windows and Mac that walks on your windows, reacts to your coding agents, and closes your doomscrolling tabs. Tiny, native, no installer, works offline.">
 <meta property="og:title" content="PixelPet Focus">
 <meta property="og:description" content="A tiny pixel pet that lives on your taskbar and closes your doomscrolling tabs. 115 KB, ~4 MB RAM, no installer.">
 <meta property="og:type" content="website">
@@ -101,6 +101,7 @@
       @keyframes pillin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
     }
   }
+  .os{font:700 15px/1.2 var(--mono);color:var(--paper);margin:26px 0 16px}
   ol.steps{counter-reset:s;list-style:none;margin:0;padding:0;max-width:64ch}
   ol.steps li{counter-increment:s;position:relative;padding:0 0 18px 42px;color:#cfd3d8}
   ol.steps li:before{content:counter(s);position:absolute;left:0;top:-2px;width:26px;height:26px;
@@ -126,12 +127,13 @@
 <header class="hero">
   <div class="wrap">
     <h1>It closes the tab<br>you shouldn't be on<span class="cursor"></span></h1>
-    <p class="lede">PixelPet Focus is a pixel creature that lives on your Windows taskbar. It watches the window in front of you, and when Shorts or Reels outstay their welcome it walks over, glares, and shuts the tab. The rest of the day it naps, climbs your screen edges and keeps you company.</p>
+    <p class="lede">PixelPet Focus is a pixel creature that lives on your taskbar, or on your Dock. It watches the window in front of you, and when Shorts or Reels outstay their welcome it walks over, glares, and shuts the tab. The rest of the day it naps, climbs your screen edges and keeps you company.</p>
     <div class="get">
-      <a class="btn" href="https://github.com/samuveljohnson1416/pixelpet/releases/latest">Download for Windows</a>
+      <a class="btn" href="https://github.com/samuveljohnson1416/pixelpet/releases/latest/download/PixelPetFocus.exe">Download for Windows</a>
+      <a class="btn" href="https://github.com/samuveljohnson1416/pixelpet/releases/latest/download/PixelPetFocus-mac.zip">Download for Mac</a>
       <a class="btn ghost" href="https://github.com/samuveljohnson1416/pixelpet">Read the source</a>
     </div>
-    <p class="spec">One <b>115 KB</b> exe · about <b>4 MB</b> of memory · no installer, no dependencies · <b>never touches the network</b></p>
+    <p class="spec">Windows: one <b>115 KB</b> exe, about <b>4 MB</b> of memory · Mac: a native app, about <b>MACMB MB</b> · no installer · <b>never touches the network</b></p>
   </div>
   <div class="wrap">
     <div class="stage">
@@ -163,10 +165,10 @@
 <main>
 <section class="wrap">
   <h2>What it does all day</h2>
-  <p class="sub">Every behaviour below runs on your machine, from things Windows already tells it: the title of your window, the app it belongs to, the address in your browser's bar.</p>
+  <p class="sub">Every behaviour below runs on your machine, from things your computer already tells it: the title of your window, the app it belongs to, the address in your browser's bar.</p>
   <div class="grid">
     <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>patrol</div>
-      <p>Each site gets its own leash: <b>6 seconds</b> for Shorts, Reels and TikTok, 90 for Reddit, 4 minutes for ordinary YouTube. Run over the limit and the pet walks across, counts down, and presses Ctrl+W. Click it during the countdown and it lets you off.</p></div>
+      <p>Each site gets its own leash: <b>6 seconds</b> for Shorts, Reels and TikTok, 90 for Reddit, 4 minutes for ordinary YouTube. Run over the limit and the pet walks across, counts down, and closes that tab. Click it during the countdown and it lets you off.</p></div>
     <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>your windows</div>
       <p>It jumps onto title bars and rides along when you drag them, climbs the screen edges, hangs upside-down from the top, and shoves a window aside if you throw it hard enough.</p></div>
     <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>company</div>
@@ -176,7 +178,7 @@
     <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>growing up</div>
       <p>Closed tabs and finished reminders earn XP. It levels up, evolves, unlocks achievements, and writes a one-line memory of each day. A week of focus sessions earns it a pair of study glasses.</p></div>
     <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>tools</div>
-      <p>Battery, free disk space, memory and uptime in one menu, with a system check and one-click Screenshot, Task Manager or Lock PC. It warns you the day your C: drive gets tight.</p></div>
+      <p>Battery, free disk space, memory and uptime in one menu, with a system check and one-click Screenshot, Task Manager (Activity Monitor on a Mac) or lock screen. It warns you the day your disk gets tight.</p></div>
   </div>
 </section>
 
@@ -191,12 +193,20 @@
 
 <section class="wrap">
   <h2>Install it in three steps</h2>
+  <h3 class="os">On Windows</h3>
   <ol class="steps">
     <li>Download <code>PixelPetFocus.exe</code> from the <a href="https://github.com/samuveljohnson1416/pixelpet/releases/latest">latest release</a> and put it somewhere permanent, like <code>C:\Apps\PixelPet</code>.</li>
     <li>Double-click it. There is no installer. Windows will warn you about an unsigned app: choose <b>More info</b>, then <b>Run anyway</b>.</li>
     <li>Right-click the pet for its menu. Tick <b>Start with Windows</b> if you want it there every morning.</li>
   </ol>
   <p class="sub">Needs 64-bit Windows 10 or 11. Everything it runs on already ships with Windows.</p>
+  <h3 class="os">On a Mac</h3>
+  <ol class="steps">
+    <li>Download <code>PixelPetFocus-mac.zip</code> from the <a href="https://github.com/samuveljohnson1416/pixelpet/releases/latest">latest release</a>, open it, and drag <b>PixelPet Focus</b> into Applications.</li>
+    <li>Open it. It isn't notarized, so the first time macOS stops it: go to <b>System Settings &gt; Privacy &amp; Security</b> and click <b>Open Anyway</b>.</li>
+    <li>Allow it in <b>Accessibility</b> when it asks, and let it control your browser when that prompt appears, so it can read titles and close the right tab. Tick <b>Open at login</b> in its menu.</li>
+  </ol>
+  <p class="sub">Needs macOS 12 or later, on Apple silicon or Intel. It lives above the Dock; right-click it for the menu.</p>
 </section>
 
 <section class="wrap">
@@ -205,7 +215,7 @@
     <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>no network</div>
       <p>There is no networking code in the app at all. No accounts, no telemetry, no update checks. Unplug your internet and nothing changes.</p></div>
     <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>no keylogging</div>
-      <p>To know you're typing it checks that input happened while the mouse sat still. It never records which keys you press, and there is no keyboard hook.</p></div>
+      <p>It notices that you're typing, never which keys. There is no keyboard hook, and nothing you type is read or stored.</p></div>
     <div class="win"><div class="bar"><i class="dot close"></i><i class="dot"></i><i class="dot"></i>nothing saved</div>
       <p>Copied text stays in memory and is never written to disk. Settings, XP and reminders live in plain text files you can read and edit yourself.</p></div>
   </div>

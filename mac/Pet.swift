@@ -140,7 +140,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var watchRemaining = -1.0, watchX = 0.0
     var dir = "", rulesPath = "", progressPath = "", remPath = "", memPath = ""
 
-    var panel: PetPanel!, view: PetView!, ropePanel: PetPanel!, ropeView: RopeView!
+    var panel: PetPanel!, view: PetView!, ropePanel: PetPanel?, ropeView: RopeView?
     var statusItem: NSStatusItem?
     var W = 260.0, H = 160.0, U = 5.0, S = 1.0, primaryH = 900.0
     var wa = R()
@@ -189,7 +189,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var colors: [Int: NSColor] = [:]
     var probeSecs = 0.0, probeElapsed = 0, marks: [String] = []
     var cx = 0.0, by = 0.0, sx = 1.0, sy = 1.0
-    let bubbleFont = NSFont.systemFont(ofSize: 12, weight: .semibold), smallFont = NSFont.systemFont(ofSize: 12, weight: .heavy)
+    let bubbleFont = NSFont.boldSystemFont(ofSize: 12), smallFont = NSFont.boldSystemFont(ofSize: 12)
 
     var movieOn: Bool { doing == "movie" && Date() < doingUntil }
 
@@ -214,17 +214,8 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel = makePanel(W, H)
         view = PetView(frame: NSRect(x: 0, y: 0, width: W, height: H)); view.pet = self
         panel.contentView = view
-        ropePanel = makePanel(1, 1); ropePanel.ignoresMouseEvents = true
-        ropeView = RopeView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
-        ropeView.fill = color(ROPE); ropeView.starFill = color(STAR); ropeView.ink = color(DARK)
-        ropePanel.contentView = ropeView
         mark("windows")
 
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = petImage(18); item.button?.toolTip = "PixelPet Focus"
-        let menu = newMenu(); menu.delegate = self; item.menu = menu
-        statusItem = item
-        mark("menu bar icon")
 
         loadReminders()
         lastCount = NSPasteboard.general.changeCount
@@ -310,6 +301,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let agentLine = agentTag()
             if tagCache == nil { tagCache = agentLine }
             gcSec += 1
+            if gcSec % 10 == 0 { _ = malloc_zone_pressure_relief(nil, 0) }      // hand freed pages back to macOS, like GC.Collect on Windows
             if probeSecs > 0 { probe() }
         }
 
@@ -333,7 +325,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if enter && !enterDown && !hidden && alert == nil && ropeT < 0 && ropeCool <= 0
             && (state == SIT || state == WALK || state == SLEEP || state == TYPE) { throwRope() }
         enterDown = enter
-        if ropeT >= 0 { ropeT += dt; if ropeT > 0.6 { ropeT = -1; ropePanel.orderOut(nil) } }
+        if ropeT >= 0 { ropeT += dt; if ropeT > 0.6 { ropeT = -1; ropePanel?.orderOut(nil) } }
 
         let phones = cfg.audio && headphones, kind = cfg.audio ? audioKind : 0
         // macOS has no system-wide output level without a recording permission, so music gets a steady beat instead
@@ -444,7 +436,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let wt = orient == 1 || orient == 2 ? ry - (H / 2).rounded(.down) : orient == 3 ? ry - U : ry + U - H
         wl = clamp(wl, wa.l, wa.r - W)
         if wl != winLeft || wt != winTop { panel.setFrameOrigin(NSPoint(x: wl, y: primaryH - wt - H)); winLeft = wl; winTop = wt }
-        if ropeT >= 0 { drawRope() } else if state == SWING { drawWeb() } else if webShown { ropePanel.orderOut(nil); webShown = false }
+        if ropeT >= 0 { drawRope() } else if state == SWING { drawWeb() } else if webShown { ropePanel?.orderOut(nil); webShown = false }
         if !hidden { view.needsDisplay = true }
     }
 
@@ -475,7 +467,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         webShown = true
         let hx = x + facing * 6 * U, hy = y - 9 * U, ax = swingAX, ay = swingAY
         let dist = ((ax - hx) * (ax - hx) + (ay - hy) * (ay - hy)).squareRoot()
-        if dist < 3 { ropePanel.orderOut(nil); webShown = false; return }
+        if dist < 3 { ropePanel?.orderOut(nil); webShown = false; return }
         let th = max(2, U * 0.4), nx = -(ay - hy) / dist * th / 2, ny = (ax - hx) / dist * th / 2
         showRope([Pt(x: hx + nx, y: hy + ny), Pt(x: ax + nx, y: ay + ny), Pt(x: ax - nx, y: ay - ny), Pt(x: hx - nx, y: hy - ny)], nil)
     }
@@ -496,7 +488,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hx = x + facing * 6 * U, hy = y - (9 - dy) * U                       // the raised paw
         let tx = hx + (ropeTx - hx) * e, ty = hy + (ropeTy - hy) * e
         let dist = ((tx - hx) * (tx - hx) + (ty - hy) * (ty - hy)).squareRoot()
-        if dist < 3 { ropePanel.orderOut(nil); return }
+        if dist < 3 { ropePanel?.orderOut(nil); return }
         let sag = min(90 * S, dist * 0.25) * (t < 0.22 ? 1 - e * 0.8 : 0.15)
         let mx = (hx + tx) / 2, my = (hy + ty) / 2 + sag, th = max(2, U * 0.45)
         let n = 16
@@ -527,12 +519,20 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var x0 = Double.greatestFiniteMagnitude, y0 = Double.greatestFiniteMagnitude, x1 = -Double.greatestFiniteMagnitude, y1 = -Double.greatestFiniteMagnitude
         for p in pts + (star ?? []) { x0 = min(x0, p.x); x1 = max(x1, p.x); y0 = min(y0, p.y); y1 = max(y1, p.y) }
         let ox = (x0 - 3).rounded(.down), oy = (y0 - 3).rounded(.down), w = (x1 + 3).rounded(.up) - ox, h = (y1 + 3).rounded(.up) - oy
-        ropeView.poly = pts.map { NSPoint(x: $0.x - ox, y: $0.y - oy) }
-        ropeView.star = star?.map { NSPoint(x: $0.x - ox, y: $0.y - oy) }
-        ropePanel.setFrame(NSRect(x: ox, y: primaryH - oy - h, width: w, height: h), display: false)
-        ropeView.frame = NSRect(x: 0, y: 0, width: w, height: h)
-        ropeView.needsDisplay = true
-        if !ropePanel.isVisible { ropePanel.orderFrontRegardless() }
+        if ropePanel == nil {                                                    // made the first time a rope or web is thrown
+            let rp = makePanel(1, 1), rv = RopeView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+            rp.ignoresMouseEvents = true
+            rv.fill = color(ROPE); rv.starFill = color(STAR); rv.ink = color(DARK)
+            rp.contentView = rv
+            ropePanel = rp; ropeView = rv
+        }
+        guard let rp = ropePanel, let rv = ropeView else { return }
+        rv.poly = pts.map { NSPoint(x: $0.x - ox, y: $0.y - oy) }
+        rv.star = star?.map { NSPoint(x: $0.x - ox, y: $0.y - oy) }
+        rp.setFrame(NSRect(x: ox, y: primaryH - oy - h, width: w, height: h), display: false)
+        rv.frame = NSRect(x: 0, y: 0, width: w, height: h)
+        rv.needsDisplay = true
+        if !rp.isVisible { rp.orderFrontRegardless() }
     }
 
     // Typing without ever knowing WHICH key: only how long ago the last key went down.
@@ -1518,7 +1518,14 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func toggleHidden() {
         hidden.toggle()
-        if hidden { panel.orderOut(nil); ropePanel.orderOut(nil) } else { panel.orderFrontRegardless() }
+        if hidden { panel.orderOut(nil); ropePanel?.orderOut(nil) } else { panel.orderFrontRegardless() }
+        // The menu bar icon is there only while the pet is hidden: right-clicking the pet opens the same menu.
+        if hidden && statusItem == nil {
+            let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+            item.button?.image = petImage(18); item.button?.toolTip = "PixelPet Focus (hidden)"
+            let menu = newMenu(); menu.delegate = self; item.menu = menu
+            statusItem = item
+        } else if !hidden, let item = statusItem { NSStatusBar.system.removeStatusItem(item); statusItem = nil }
     }
 
     // Charger in/out and low battery. Desktops (no battery) never trigger anything.
@@ -2343,6 +2350,9 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func probe() {
         probeElapsed += 1
         if probeElapsed == 2 { mark("first second drawn") }
+        if probeElapsed == 12 { startSwing(x < (wa.l + wa.r) / 2 ? wa.r - 100 : wa.l + 100) }
+        if probeElapsed == 14 { mark("after a web-swing (\(state == SWING ? "swinging" : "landed"))") }
+        if probeElapsed == 15 { toggleHidden(); mark("hidden, menu bar icon"); toggleHidden() }
         if probeElapsed == 10 {
             let mine = ((CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]) ?? []).filter { ($0[kCGWindowOwnerPID as String] as? Int32) == getpid() }
             print("::notice title=Mac memory::PixelPet Focus uses " + String(format: "%.1f", footprintMB()) + " MB (phys_footprint, the Activity Monitor number)")
