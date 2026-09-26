@@ -187,7 +187,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var urlFor = "", urlCache = "", urlReadAt = Date.distantPast, scripts: [String: NSAppleScript] = [:]
     var winCache: [Win]?
     var colors: [Int: NSColor] = [:]
-    var probeSecs = 0.0, probeElapsed = 0
+    var probeSecs = 0.0, probeElapsed = 0, marks: [String] = []
     var cx = 0.0, by = 0.0, sx = 1.0, sy = 1.0
     let bubbleFont = NSFont.systemFont(ofSize: 12, weight: .semibold), smallFont = NSFont.systemFont(ofSize: 12, weight: .heavy)
 
@@ -195,6 +195,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // ------------------------------------------------------------------ start-up
     func applicationDidFinishLaunching(_ note: Notification) {
+        mark("AppKit up")
         let fm = FileManager.default
         dir = ProcessInfo.processInfo.environment["PIXELPET_DIR"] ?? NSHomeDirectory() + "/Library/Application Support/PixelPet Focus"
         try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
@@ -203,6 +204,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         cfg = parseCfg(readLines(rulesPath)); rulesStamp = mtime(rulesPath)
         loadProgress()
         initMemories()
+        mark("files")
 
         U = max(2, (5 * S * cfg.size).rounded())
         W = max(260 * S, 22 * U); H = 12 * U + 100 * S                          // room for a 3-line reminder sign
@@ -216,11 +218,13 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ropeView = RopeView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
         ropeView.fill = color(ROPE); ropeView.starFill = color(STAR); ropeView.ink = color(DARK)
         ropePanel.contentView = ropeView
+        mark("windows")
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = petImage(18); item.button?.toolTip = "PixelPet Focus"
         let menu = newMenu(); menu.delegate = self; item.menu = menu
         statusItem = item
+        mark("menu bar icon")
 
         loadReminders()
         lastCount = NSPasteboard.general.changeCount
@@ -235,6 +239,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastTick = ProcessInfo.processInfo.systemUptime
         let t = Timer(timeInterval: 1.0 / 30, target: self, selector: #selector(tickTimer), userInfo: nil, repeats: true)
         RunLoop.main.add(t, forMode: .common)                                   // keeps animating while a menu is open
+        mark("hot keys + timers")
         panel.orderFrontRegardless()
         if bubbleT <= 0 { chirp("Hi! I'll keep you focused.", 3) }
         joyT = 2
@@ -288,7 +293,9 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
             secAcc = 0
             wa = workArea()
             watch()
+            if gcSec == 0 { mark("patrol check") }
             audioWatch()
+            if gcSec == 0 { mark("Core Audio") }
             focusTimer()
             power()
             reminders()
@@ -2331,12 +2338,16 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // ------------------------------------------------------------------ CI probe: PixelPetFocus --probe <seconds>
     // Runs the real pet on the build machine's screen, then prints what it measured as GitHub annotations:
     // memory, whether its window is on screen, an ASCII picture of what it drew, and whether a hook and a copy reached it.
+    func mark(_ label: String) { if probeSecs > 0 { marks.append(label + " " + String(format: "%.1f", footprintMB())) } }
+
     func probe() {
         probeElapsed += 1
+        if probeElapsed == 2 { mark("first second drawn") }
         if probeElapsed == 10 {
             let mine = ((CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]) ?? []).filter { ($0[kCGWindowOwnerPID as String] as? Int32) == getpid() }
             print("::notice title=Mac memory::PixelPet Focus uses " + String(format: "%.1f", footprintMB()) + " MB (phys_footprint, the Activity Monitor number)")
             print("::notice title=Mac window::\(mine.count) window(s) on screen. Pet at x=\(Int(x)) y=\(Int(y)), floor y=\(Int(wa.b)), screen width \(Int(wa.r)), state \(state)")
+            print("::notice title=Mac memory by stage (MB)::" + marks.joined(separator: ", "))
             print("::notice title=Mac sprite::" + spriteAscii().joined(separator: "%0A"))
         }
         if probeElapsed >= Int(probeSecs) {

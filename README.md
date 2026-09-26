@@ -1,10 +1,12 @@
 # PixelPet Focus
 
-A tiny pixel pet for your Windows desktop. It walks over and closes your doomscrolling tab.
+A tiny pixel pet for your Windows or Mac desktop. It walks over and closes your doomscrolling tab.
 
 **[Download the latest release](https://github.com/samuveljohnson1416/pixelpet/releases/latest)** · [Website](https://samuveljohnson1416.github.io/pixelpet/)
 
-PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no dependencies. It is written in C# against raw Win32 and GDI, and compiled with the C# compiler that ships with Windows.
+On Windows, PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no dependencies. It is written in C# against raw Win32 and GDI, and compiled with the C# compiler that ships with Windows.
+
+On a Mac it is a native Swift and AppKit app (Apple Silicon and Intel, macOS 12 or later) with the same pet and the same brain. See [On a Mac](#on-a-mac) for the few differences.
 
 ## What it does
 
@@ -93,6 +95,8 @@ PixelPet Focus is one small `.exe` (about 115 KB). It has no installer and no de
 
 ## Install
 
+### Windows
+
 1. Download `PixelPetFocus.exe` from the [Releases](../../releases) page. (If there's no release yet, see [Build from source](#build-from-source).)
 2. Put it somewhere permanent, for example `Documents\PixelPet`, and double-click it. There is no installer.
 3. The exe isn't code-signed, so Windows SmartScreen may say "Windows protected your PC". Click **More info**, then **Run anyway**.
@@ -103,16 +107,43 @@ Settings and progress are saved in `%APPDATA%\PixelPet Focus`. To have it start 
 
 **To uninstall:** untick **Start with Windows**, choose **Quit**, then delete the exe and the `%APPDATA%\PixelPet Focus` folder.
 
+### Mac
+
+1. Download `PixelPetFocus-mac.zip` from the [Releases](../../releases) page and double-click it to unzip.
+2. Drag **PixelPet Focus** into your **Applications** folder. (Keep it there: coding-agent hooks point at its exact location.)
+3. The app isn't notarized by Apple, so the first launch is blocked. Open it once, then go to **System Settings > Privacy & Security** and click **Open Anyway**. On macOS 14 and older you can instead right-click the app and choose **Open**. Or run this once in Terminal:
+
+   ```bash
+   xattr -dr com.apple.quarantine "/Applications/PixelPet Focus.app"
+   ```
+
+4. The pet appears above the Dock, and a small pet icon appears in the menu bar. On the first launch macOS asks to allow it in **Accessibility**. Say yes if you want it to read window titles, ride and push windows, and close apps. It works without it, just with less to go on.
+
+Settings and progress are saved in `~/Library/Application Support/PixelPet Focus`. **Open at login** in its menu adds a LaunchAgent (`~/Library/LaunchAgents/io.github.samuveljohnson1416.pixelpet.plist`).
+
+**To uninstall:** untick **Open at login**, choose **Quit PixelPet**, then delete the app and that folder.
+
+### On a Mac
+
+Everything above works the same, with these differences:
+
+- **Permissions come from macOS, and you give them from the pet's Permissions menu.** Browsers: the first time it reads a tab's address, macOS asks whether PixelPet may control Chrome (or Safari, Brave, Edge, Arc, Vivaldi, Opera). That is how it sees `youtube.com/shorts` and how it closes just that tab. Accessibility: window titles, riding, pushing and bumping windows, the text cursor for the Return rope, and closing non-browser apps. Input Monitoring: the typing laptop and the Return rope may need it on some macOS versions.
+- **Firefox and Zen** don't let other apps read their address bar, so rules match their window titles only, and the pet closes a tab with the same Cmd+W you would press.
+- **Movie night reactions:** macOS won't let an app read the system's sound level without a screen-recording permission, so the jump-scare and loud-scene reactions are Windows-only. Popcorn, sipping, and the chatter in the mood of the film all work. Likewise the music dance follows a steady beat rather than the song.
+- **Settings...** opens `rules.txt` in TextEdit instead of a settings window. Changes apply within a second of saving.
+- The menu bar icon replaces the tray icon, **Open at login** replaces **Start with Windows**, and the Tools menu opens Screenshot, Activity Monitor, Calculator and TextEdit.
+- Shortcuts use the Mac keys: `ctrl+alt+shift+c` is Control+Option+Shift+C. You can use `cmd` in `clipkey` and `swingkey`.
+
 ## How to use
 
 | Action | What happens |
 | --- | --- |
 | Left-click the pet | Pat it: hearts and XP. It also wakes it from a nap, snoozes the patrol during a countdown, marks a reminder sign as done, or opens the clipboard options while a `!` is showing. |
 | Drag the pet | Pick it up. Let go to throw it. |
-| Right-click the pet or the tray icon | Opens the menu. |
+| Right-click the pet or the tray icon (menu bar icon on a Mac) | Opens the menu. |
 | Double-click the tray icon | Hides or shows the pet. |
 | Ctrl+Alt+Shift+C | Opens the clipboard menu. Change it with `clipkey`. |
-| Enter | Throws the rope at your caret (`enterrope = yes`). |
+| Enter (Return on a Mac) | Throws the rope at your caret (`enterrope = yes`). |
 | Ctrl+Alt+Shift+W | Web-swing: the pet shoots a web at your cursor and swings there (`webtravel = yes`). Change it with `swingkey`. Also **Web-swing here** in the menu. |
 
 The menu shows your level, battery and audio status. It also has: start/stop the focus timer, snooze or resume the patrol, **On patrol** (turns closing on or off), nap now, the **Clipboard** and **Reminders** submenus, **Settings...**, **Start with Windows**, hide/show the pet, and **Quit**.
@@ -191,7 +222,16 @@ Self-test (rule matching, time parsing, secret detection, math, link cleaning, r
 (Start-Process .\PixelPetFocus.exe -ArgumentList '--selftest' -Wait -PassThru).ExitCode
 ```
 
-GitHub Actions builds every push the same way, runs the self-test and attaches the exe to a Release when a `v*` tag is pushed.
+**Mac:** you need the Xcode Command Line Tools (`xcode-select --install`), nothing else:
+
+```bash
+bash mac/build.sh
+"mac/build/PixelPet Focus.app/Contents/MacOS/PixelPetFocus" --selftest
+```
+
+This builds a universal `mac/build/PixelPet Focus.app` (and a zip of it) from three Swift files: `mac/Core.swift` (the rules, clipboard helpers, reminders and hook installer, plain Foundation), `mac/Pet.swift` (the pet) and `mac/Main.swift`.
+
+GitHub Actions builds every push on Windows and on a Mac, runs both self-tests, runs the Mac app for 20 seconds on the runner's screen (it reports its memory, its window and an ASCII picture of what it drew, and checks that a Claude Code hook and a copied reminder reach it), and attaches both downloads to a Release when a `v*` tag is pushed.
 
 ## Privacy
 
@@ -200,6 +240,7 @@ GitHub Actions builds every push the same way, runs the self-test and attaches t
 - **No keylogging.** There's no keyboard hook. To detect typing it checks that new input arrived, that the mouse didn't move and that some text key is held down right now. All that feeds is an "is typing" level. It never records or stores which keys you press. The Enter rope only checks whether Enter is down.
 - **Clipboard:** it only looks at text copies of up to 2,000 characters. It skips anything marked private by password managers or clipboard-history exclusions, anything that looks like a key or token (`sk-`, `ghp_`, `github_pat_`, `AKIA`, `xox`, JWTs, PEM blocks), 4 to 8 digit codes, and single words that mix letters, digits and symbols like a password. Clipboard text stays in memory and is never written to disk. The one exception is when you pick a **Remind me** option: then the reminder's short message is saved to `reminders.txt`.
 - **Coding agents:** the hook passes only the state, the session id, the project folder and the agent's notification text to the pet. It sends them through a local window message, and nothing leaves your PC. `~/.claude/settings.json` is changed only when you click **Connect** or **Disconnect**. That runs as a separate short-lived process, so the pet itself never loads a JSON library.
+- **On a Mac** it uses AppKit, Core Audio, Accessibility, Carbon hot keys, CGWindowList and AppleScript sent only to your browsers, and `DistributedNotificationCenter` for the agent hooks. It has no networking code either.
 - **What it writes:** `rules.txt`, `reminders.txt`, `progress.txt` (level, XP, counters, streak, achievements and a 2-week daily tally) and `memories.txt` (the memory book, plain text) in `%APPDATA%\PixelPet Focus`, plus the Run registry value if you tick **Start with Windows**.
 
 ## Resource use
