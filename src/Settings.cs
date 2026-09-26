@@ -14,7 +14,7 @@ static class Settings
               ID_SIZE = 111, ID_FOCUS = 112, ID_BREAK = 113, ID_AUTOSTART = 114, ID_LIST = 115,
               ID_RLABEL = 116, ID_RSECS = 117, ID_RPATS = 118, ID_ADD = 119, ID_APPLY = 120,
               ID_DEL = 121, ID_DEFAULTS = 122, ID_NEVER = 123, ID_SAVE = 124, ID_CLOSEBTN = 125,
-              ID_OPENTXT = 126, ID_UP = 127, ID_DOWN = 128, ID_CLIP = 129, ID_HOTKEY = 130, ID_CLIMB = 131, ID_WEB = 132, ID_CLIPKEY = 133, ID_SWINGKEY = 134;
+              ID_OPENTXT = 126, ID_UP = 127, ID_DOWN = 128, ID_CLIP = 129, ID_HOTKEY = 130, ID_CLIMB = 131, ID_WEB = 132, ID_CLIPKEY = 133, ID_SWINGKEY = 134, ID_WATER = 135, ID_STRETCH = 136, ID_SCREEN = 137;
 
     static readonly double[] Sizes = { 0.75, 1, 1.25, 1.5, 2 };
     static readonly string[] SizeNames = { "0.75x", "1x", "1.25x", "1.5x", "2x" };
@@ -43,7 +43,7 @@ static class Settings
         var o = new Cfg();
         o.Countdown = c.Countdown; o.Snooze = c.Snooze; o.Focus = c.Focus; o.Break = c.Break;
         o.Nag = c.Nag; o.Wander = c.Wander; o.Sleepy = c.Sleepy; o.Typing = c.Typing;
-        o.EnterRope = c.EnterRope; o.Climb = c.Climb; o.WebTravel = c.WebTravel; o.Audio = c.Audio; o.Clipboard = c.Clipboard; o.Hotkey = c.Hotkey; o.Curious = c.Curious; o.Claude = c.Claude; o.Stretch = c.Stretch; o.Push = c.Push; o.Quiet = c.Quiet; o.ClipKey = c.ClipKey; o.SwingKey = c.SwingKey; o.Size = c.Size;
+        o.EnterRope = c.EnterRope; o.Climb = c.Climb; o.WebTravel = c.WebTravel; o.Audio = c.Audio; o.Clipboard = c.Clipboard; o.Hotkey = c.Hotkey; o.Curious = c.Curious; o.Claude = c.Claude; o.Stretch = c.Stretch; o.Water = c.Water; o.ScreenTime = c.ScreenTime; o.Push = c.Push; o.Quiet = c.Quiet; o.ClipKey = c.ClipKey; o.SwingKey = c.SwingKey; o.Size = c.Size;
         o.Never = (string[])c.Never.Clone();
         o.Rules = c.Rules;
         return o;
@@ -69,7 +69,7 @@ static class Settings
             classReady = true;
         }
 
-        int w = D(676), h = D(752);
+        int w = D(676), h = D(770);
         var scr = new RECT(); SystemParametersInfo(0x30, 0, ref scr, 0);
         int px = (scr.L + scr.R - w) / 2, py = (scr.T + scr.B - h) / 2;
         // WS_OVERLAPPED|CAPTION|SYSMENU|MINIMIZEBOX, sized so the client area fits the layout
@@ -165,10 +165,15 @@ static class Settings
         Group("Never touch (one phrase per line)", 334, 464, 328, 122);
         Edit(344, 486, 308, 88, 0x4 | 0x40 | 0x1000 | 0x200000, ID_NEVER);          // MULTILINE|AUTOVSCROLL|WANTRETURN|WS_VSCROLL
 
-        Push("Open rules.txt", 12, 620, 120, ID_OPENTXT);
-        status = Mk("STATIC", "", 0, 140, 626, 290, 18, 0);
-        Push("Save", 452, 618, 96, ID_SAVE);
-        Push("Close", 556, 618, 96, ID_CLOSEBTN);
+        Group("Break reminders (minutes of non-stop use, 0 = off)", 334, 594, 328, 62);
+        Label("Water", 344, 620, 44); Edit(390, 618, 40, 22, 0x2000, ID_WATER);
+        Label("Stretch", 442, 620, 50); Edit(494, 618, 40, 22, 0x2000, ID_STRETCH);
+        Label("Screen time", 546, 620, 66); Edit(614, 618, 38, 22, 0x2000, ID_SCREEN);
+
+        Push("Open rules.txt", 12, 672, 120, ID_OPENTXT);                            // below both columns
+        status = Mk("STATIC", "", 0, 140, 678, 300, 18, 0);
+        Push("Save", 452, 670, 96, ID_SAVE);
+        Push("Close", 556, 670, 96, ID_CLOSEBTN);
 
         for (int i = 0; i < SizeNames.Length; i++) SendMessageStr(ctl[ID_SIZE], 0x0143, IntPtr.Zero, SizeNames[i]);   // CB_ADDSTRING
     }
@@ -212,6 +217,7 @@ static class Settings
         for (int i = 0; i < Sizes.Length; i++) if (Math.Abs(Sizes[i] - cfg.Size) < 0.01) pick = i;
         SendMessage(ctl[ID_SIZE], 0x014E, (IntPtr)pick, IntPtr.Zero);                   // CB_SETCURSEL
         SetText(ID_FOCUS, cfg.Focus.ToString()); SetText(ID_BREAK, cfg.Break.ToString());
+        SetText(ID_WATER, cfg.Water.ToString()); SetText(ID_STRETCH, cfg.Stretch.ToString()); SetText(ID_SCREEN, cfg.ScreenTime.ToString());
         SetCheck(ID_AUTOSTART, App.AutoStartFlag(null));
         SetText(ID_NEVER, string.Join("\r\n", cfg.Never));
         rules.Clear();
@@ -297,6 +303,7 @@ static class Settings
         cfg.Clipboard = GetCheck(ID_CLIP); cfg.Hotkey = GetCheck(ID_HOTKEY); cfg.Climb = GetCheck(ID_CLIMB); cfg.WebTravel = GetCheck(ID_WEB);
         cfg.ClipKey = Key(ID_CLIPKEY, cfg.ClipKey); cfg.SwingKey = Key(ID_SWINGKEY, cfg.SwingKey);
         cfg.Focus = GetNum(ID_FOCUS, 1, 600, 25); cfg.Break = GetNum(ID_BREAK, 1, 600, 5);
+        cfg.Water = GetNum(ID_WATER, 0, 600, 45); cfg.Stretch = GetNum(ID_STRETCH, 0, 600, 90); cfg.ScreenTime = GetNum(ID_SCREEN, 0, 600, 60);
         int sel = SendMessage(ctl[ID_SIZE], 0x0147, IntPtr.Zero, IntPtr.Zero).ToInt32();   // CB_GETCURSEL
         cfg.Size = sel >= 0 && sel < Sizes.Length ? Sizes[sel] : 1;
 
@@ -338,6 +345,9 @@ static class Settings
         sb.Append("size = ").Append(c.Size.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
         sb.Append("focus = ").Append(c.Focus).Append("\r\n");
         sb.Append("break = ").Append(c.Break).Append("\r\n");
+        sb.Append("water = ").Append(c.Water).Append("\r\n");
+        sb.Append("stretch = ").Append(c.Stretch).Append("\r\n");
+        sb.Append("screentime = ").Append(c.ScreenTime).Append("\r\n");
         // keep settings this window doesn't know yet (added by a newer build or by hand), so Save never drops them
         var written = sb.ToString();
         try

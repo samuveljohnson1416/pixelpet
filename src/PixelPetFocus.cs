@@ -16,7 +16,7 @@ class Rule { public string Label; public int Grace; public string[] Any; }
 
 class Cfg
 {
-    public int Countdown = 3, Snooze = 5, Focus = 25, Break = 5, Stretch = 90;
+    public int Countdown = 3, Snooze = 5, Focus = 25, Break = 5, Stretch = 90, Water = 45, ScreenTime = 60;
     public bool Claude = true, Push = true, Quiet;
     public string ClipKey = "ctrl+alt+shift+c", SwingKey = "ctrl+alt+shift+w";
     public bool Costumes = true;
@@ -57,7 +57,9 @@ audio = yes        # wears headphones when they're connected; dances to music, t
 size = 1           # pet size multiplier (restart)
 focus = 25         # focus timer minutes
 break = 5          # break minutes
-stretch = 90       # nudge to stretch after this many minutes of non-stop activity (0 = off)
+stretch = 90       # stand up and stretch after this many minutes of non-stop use (0 = off)
+water = 45         # a sip of water after this many minutes of non-stop use (0 = off)
+screentime = 60    # says how long you've been on the screen, every this many minutes of non-stop use (0 = off)
 agents = yes       # reacts when a coding agent (Claude Code, Codex, Gemini, Antigravity...) works, needs you, or finishes
 push = yes         # nudges windows around like furniture now and then; throw it at a window to knock it aside
 costumes = yes     # hats and props for the moment: telescope, detective glass, lab flask, wizard, parachute...
@@ -129,6 +131,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
                     case "focus": c.Focus = Math.Max(1, n); break;
                     case "break": c.Break = Math.Max(1, n); break;
                     case "stretch": c.Stretch = Math.Max(0, n); break;
+                    case "water": c.Water = Math.Max(0, n); break;
+                    case "screentime": c.ScreenTime = Math.Max(0, n); break;
                     case "claude": case "agents": c.Claude = yes; break;
                     case "push": c.Push = yes; break;
                     case "quiet": c.Quiet = yes; break;
@@ -247,7 +251,11 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static double snackT = 5, snackLeft; static int snackKind;                   // 0 = just holding them, 1 = munching popcorn, 2 = sipping the drink
     static bool MovieOn { get { return doing == "movie" && DateTime.Now < doingUntil; } }
     static readonly Dictionary<string, AgentSess> agents = new Dictionary<string, AgentSess>();   // Claude Code sessions, by session id
-    static DateTime lastAgentXp; static int activeSec;
+    static DateTime lastAgentXp;
+    static int useSec, waterSec, stretchSec, sinceNudge = 9999, lastTold, screenToday; static DateTime screenDay;   // break buddy
+    static double drinkT, stretchT, clockT, grooveT, ropeWait; static bool grooving; static int webHops;
+    static readonly AutoResetEvent askFocus = new AutoResetEvent(false);        // Enter: the watcher finds the focused field
+    static bool focusAsk, focusGot; static int focusX, focusY;
     static int closes, pats, focusDone, remDone, clipActs, claudeDone, streak, bestStreak, ach; static DateTime lastDay; static bool nightOwl;
     const int CAP = 0xC86E3C, HEADBAND = 0x3C3CDC;
     static string MemPath; static readonly List<string> memTail = new List<string>();     // the last few memories, for the menu
@@ -394,6 +402,8 @@ YouTube         | 240 | youtube.com/watch, - youtube
         double dt = Math.Min(0.1, (now - lastTick) / 1000.0); lastTick = now;
         animT += dt; stateT += dt;
         chargeT = Math.Max(0, chargeT - dt);
+        if (drinkT > 0 && (drinkT -= dt) <= 0) Hearts(2);
+        stretchT = Math.Max(0, stretchT - dt); clockT = Math.Max(0, clockT - dt);
         detectiveT = Math.Max(0, detectiveT - dt); wizardT = Math.Max(0, wizardT - dt); paraT = Math.Max(0, paraT - dt);
         clipOfferT -= dt; curiousT -= dt; askT -= dt;
         joyT = Math.Max(0, joyT - dt); angryT = Math.Max(0, angryT - dt); sqT = Math.Max(0, sqT - dt); bubbleT -= dt;
@@ -415,7 +425,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 var left = focusEnd - DateTime.Now; if (left.Ticks < 0) left = TimeSpan.Zero;
                 tagCache = (focusPhase == 1 ? "Focus " : "Break ") + (int)left.TotalMinutes + ":" + left.Seconds.ToString("00");
             }
-            StretchCheck();
+            Wellness();
             if (gcSec % 60 == 0) RollDay();
             if (gcSec % 600 == 30) DiskCheck();
             string agentTag = AgentTag();
@@ -436,7 +446,13 @@ YouTube         | 240 | youtube.com/watch, - youtube
         DetectTyping(c, dt);
         bool enter = (GetAsyncKeyState(0x0D) & 0x8000) != 0;
         ropeCool -= dt; webCool -= dt;
-        if (enter && !enterDown && cfg.EnterRope && !hidden && alert == null && ropeT < 0 && ropeCool <= 0
+        if (ropeWait > 0)
+        {
+            bool got; int fx, fy; lock (Sync) { got = focusGot; fx = focusX; fy = focusY; focusGot = false; }
+            if (got && fx != int.MinValue) { ropeWait = 0; Lasso(fx, fy); }
+            else if (got || (ropeWait -= dt) <= 0) { ropeWait = 0; POINT mp; GetCursorPos(out mp); Lasso(mp.X, mp.Y); }
+        }
+        if (enter && !enterDown && cfg.EnterRope && !hidden && alert == null && ropeT < 0 && ropeWait <= 0 && ropeCool <= 0
             && (state == SIT || state == WALK || state == SLEEP || state == TYPE)) ThrowRope();
         enterDown = enter;
         if (ropeT >= 0 && (ropeT += dt) > 0.6) { ropeT = -1; ShowWindow(ropeWnd, 0); }
@@ -448,12 +464,13 @@ YouTube         | 240 | youtube.com/watch, - youtube
         }
         if (kind != lastKind)
         {
-            lastKind = kind;
+            lastKind = kind; grooving = kind == 1; grooveT = Rand(15, 35);
             if (alert == null && kind == 1) Say("Ooh, music!", 2);
             else if (alert == null && kind == 2) { Say("Class time. Taking notes.", 2.5); if (state == WALK || state == SLEEP) SetState(SIT, 6); }
         }
-        danceLevel = danceLevel * 0.55 + (kind == 1 ? audioPeak : 0) * 0.45;       // fast attack: bounces on the beat
-        if (kind == 1 && audioPeak > 0.05 && (state == SIT || state == TYPE || state == WALK) && (noteT -= dt) <= 0)
+        if (kind == 1 && (grooveT -= dt) <= 0) { grooving = !grooving; grooveT = grooving ? Rand(15, 35) : Rand(30, 70); }   // dances a while, then a break
+        danceLevel = danceLevel * 0.55 + (kind == 1 && grooving ? audioPeak : 0) * 0.45;   // fast attack: bounces on the beat
+        if (kind == 1 && grooving && audioPeak > 0.05 && (state == SIT || state == TYPE || state == WALK) && (noteT -= dt) <= 0)
         {
             noteT = Rand(0.6, 1.2);
             parts.Add(new Part { X = x + Rand(-7, 6) * U, Y = y - 11 * U, VY = -35 * S, Life = 1.5, Text = rnd.Next(2) == 0 ? "\u266A" : "\u266B" });
@@ -573,18 +590,18 @@ YouTube         | 240 | youtube.com/watch, - youtube
     // Web travel: shoot a strand to wherever the cursor is and swing there, on a big arc anchored
     // above the midpoint, so it reads as real travel rather than a teleport. Works from any state the
     // pet can safely leave unattended (walking, sitting, napping, typing, or hanging/climbing a wall).
-    static bool StartSwing(int cursorX, bool forAlert = false)
+    static bool StartSwing(int cursorX, bool forAlert = false, bool trip = false)
     {
         if (!cfg.WebTravel || held || hidden) return false;
         if (forAlert) { if (state == SWING || state == AIR || state == HELD) return false; }   // a doomscroll alert: from any calm or wall state
         else
         {
-            if (alert != null || sign != null || webCool > 0) return false;
+            if (alert != null || sign != null || (webCool > 0 && !trip)) return false;
             if (state != SIT && state != WALK && state != SLEEP && state != TYPE && state != HANG && state != CLIMB) return false;
         }
         double tx = Clamp((double)cursorX, wa.L + 8 * U, wa.R - 8 * U);
         double dist = Math.Abs(tx - x);
-        if (dist < 40 * S) { if (!forAlert) Say("Already here!", 1.2); return false; }
+        if (dist < 40 * S) { if (!forAlert && !trip) Say("Already here!", 1.2); return false; }
         orient = 0; climbNext = 0; hangSleep = false; climbAfterWalk = false; perch = IntPtr.Zero; ignorePerch = IntPtr.Zero;
         curiousLine = null; askT = 0; bubbleT = 0; pushTarget = IntPtr.Zero;
         swingSX = x; swingSY = y; swingTX = tx; swingTY = wa.B;
@@ -593,7 +610,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         swingAX = swingSX + (swingTX - swingSX) * 0.5;
         swingAY = baseline - rise;
         facing = swingTX >= swingSX ? 1 : -1;
-        SetState(SWING, Clamp(dist / ((forAlert ? 700 : 520) * S), forAlert ? 0.45 : 0.55, forAlert ? 1.5 : 1.7));   // an alert is in a hurry
+        SetState(SWING, Clamp(dist / ((forAlert ? 1200 : 1000) * S), 0.35, 0.9));   // quick, and quicker still for an alert
         return true;
     }
 
@@ -632,19 +649,26 @@ YouTube         | 240 | youtube.com/watch, - youtube
         PaintRope();
     }
 
-    // Enter: lasso the spot you just typed at. The text caret when the app exposes one, else the mouse.
+    // Enter: lasso the spot you just typed at. A classic text caret (Notepad, dialogs) is exact. Browsers and modern
+    // apps have none, so the watcher thread asks UI Automation for the focused field (the address bar, a chat box,
+    // a search box) and the rope lands there. The mouse pointer is only the last resort.
     static void ThrowRope()
     {
         IntPtr fg = GetForegroundWindow();
         if (fg == hwnd) return;
-        POINT t; GetCursorPos(out t);
         uint pid; var gti = new GUITHREADINFO(); gti.cbSize = Marshal.SizeOf(typeof(GUITHREADINFO));
         if (GetGUIThreadInfo(GetWindowThreadProcessId(fg, out pid), ref gti) && gti.hwndCaret != IntPtr.Zero)
         {
             POINT p; p.X = gti.rcCaret.L; p.Y = (gti.rcCaret.T + gti.rcCaret.B) / 2;
-            if (ClientToScreen(gti.hwndCaret, ref p)) t = p;
+            if (ClientToScreen(gti.hwndCaret, ref p)) { Lasso(p.X, p.Y); return; }
         }
-        ropeTx = t.X; ropeTy = t.Y; ropeT = 0; ropeCool = 1.2;
+        lock (Sync) { focusAsk = true; focusGot = false; }
+        askFocus.Set(); ropeWait = 0.35;                                         // it answers in a few milliseconds
+    }
+
+    static void Lasso(int tx, int ty)
+    {
+        ropeTx = tx; ropeTy = ty; ropeT = 0; ropeCool = 1.2;
         facing = ropeTx >= x ? 1 : -1;
         if (state == SLEEP || state == WALK) SetState(SIT, 2);
     }
@@ -745,8 +769,10 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static void ChooseNext()
     {
         double r = rnd.NextDouble();
-        if (MovieOn) { SetState(SIT, Rand(8, 15)); return; }                    // stay put and watch with you
-        if (lastKind == 2 || (lastKind == 1 && r < 0.6)) { SetState(SIT, Rand(4, 8)); return; }   // class: don't distract
+        if (webHops > 0) { webHops--; if (WebHop()) return; webHops = 0; }       // the rest of a web-slinging trip
+        if (MovieOn && r < 0.8) { SetState(SIT, Rand(10, 20)); return; }        // watch with you, with the odd break
+        if (MovieOn) { Chirp(Pick("Be right back!", "Popcorn refill!", "Stretching my legs."), 2); r = rnd.NextDouble() * 0.5; }   // a stroll or a nap
+        if (lastKind == 2 || (lastKind == 1 && grooving)) { SetState(SIT, Rand(4, 8)); return; }   // class: stay put; music: dance, between breaks
         if (CuriousVisit()) return;
         if (perch != IntPtr.Zero)
         {
@@ -761,8 +787,9 @@ YouTube         | 240 | youtube.com/watch, - youtube
         else if (r < 0.72 && cfg.Wander && JumpOntoWindow()) { }
         else if (r < 0.82 && cfg.Wander && cfg.Climb) GoClimb();
         else if (r < 0.86 && cfg.Wander && PlanPush()) { }
-        else if (r < 0.9 && cfg.Wander) { POINT c; GetCursorPos(out c); Walk(c.X); }   // come see what you're doing
-        else if (r < 0.96) Hop(0, -520 * S);
+        else if (r < 0.9 && cfg.Wander && cfg.WebTravel && WebTrip()) { }
+        else if (r < 0.93 && cfg.Wander) { POINT c; GetCursorPos(out c); Walk(c.X); }   // come see what you're doing
+        else if (r < 0.97) Hop(0, -520 * S);
         else SetState(SIT, Rand(2, 5));
     }
 
@@ -974,7 +1001,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 + "\r\nreminders=" + remDone + "\r\nclipboard=" + clipActs + "\r\nclaude=" + claudeDone + "\r\nstreak=" + streak + "\r\nbest=" + bestStreak
                 + "\r\nlastday=" + (lastDay == DateTime.MinValue ? "" : lastDay.ToString("yyyy-MM-dd", Inv)) + "\r\nowl=" + (nightOwl ? 1 : 0) + "\r\nach=" + ach
                 + "\r\nmet=" + (met == DateTime.MinValue ? "" : met.ToString("yyyy-MM-dd", Inv))
-                + "\r\nday=" + (todayDate == DateTime.MinValue ? "" : EncodeDay(todayDate, today)) + "\r\nhist=" + string.Join(";", hist.ToArray()) + "\r\n");
+                + "\r\nday=" + (todayDate == DateTime.MinValue ? "" : EncodeDay(todayDate, today)) + "\r\nhist=" + string.Join(";", hist.ToArray()) + "\r\nscreen=" + screenDay.ToString("yyyyMMdd", Inv) + ":" + screenToday + "\r\n");
         }
         catch { }
     }
@@ -999,6 +1026,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                     case "lastday": DateTime d; if (DateTime.TryParseExact(v, "yyyy-MM-dd", Inv, DateTimeStyles.None, out d)) lastDay = d; break;
                     case "met": DateTime m; if (DateTime.TryParseExact(v, "yyyy-MM-dd", Inv, DateTimeStyles.None, out m)) met = m; break;
                     case "day": DateTime dd; int[] t; if (DecodeDay(v, out dd, out t)) { todayDate = dd; today = t; } break;
+                    case "screen": if (v.Length > 9 && v.StartsWith(DateTime.Today.ToString("yyyyMMdd", Inv) + ":")) { int.TryParse(v.Substring(9), out screenToday); screenDay = DateTime.Today; } break;
                     case "hist": foreach (var e in v.Split(';')) { DateTime hd; int[] ht; if (DecodeDay(e, out hd, out ht)) hist.Add(e); } break;
                 }
             }
@@ -1033,7 +1061,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     // 1 explorer + telescope, 2 detective, 3 lab flask, 4 wizard, 5 parachute, 6 briefcase, 7 coffee, 8 map, 9 thinking, 10 ideas
     static int Costume()
     {
-        if (!cfg.Costumes || state == HELD || alert != null || sign != null) return 0;
+        if (!cfg.Costumes || state == HELD || alert != null || sign != null || drinkT > 0 || stretchT > 0 || clockT > 0) return 0;
         if (paraT > 0 && state == AIR) return 5;
         if (wizardT > 0) return 4;
         if (askT > 0) return 9;
@@ -1422,14 +1450,53 @@ YouTube         | 240 | youtube.com/watch, - youtube
     // ------------------------------------------------------------------ stretch nudge (idea from AgentPet's break reminder)
     static uint IdleMs() { var li = new LASTINPUTINFO(); li.cbSize = 8; GetLastInputInfo(ref li); return (uint)Environment.TickCount - li.dwTime; }
 
-    static void StretchCheck()
+    // Break buddy: counts non-stop use (a 5-minute pause resets it), sends you to drink and to stretch, and now and
+    // then says how long you've been at it. Nudges wait for a free moment: not in a focus session, a movie, a meeting
+    // or a presentation, and never over something it's already saying.
+    static void Wellness()
     {
-        if (IdleMs() > 5 * 60 * 1000 || focusPhase != 0) { activeSec = 0; return; }   // a 5-minute pause counts as a break; focus has its own
-        activeSec++;
-        if (cfg.Stretch <= 0 || activeSec < cfg.Stretch * 60 || alert != null || sign != null) return;
-        activeSec = 0;
-        Say("You've been at it for " + cfg.Stretch + " minutes. Stretch those legs?", 6); joyT = 2; MessageBeep(0x40);
-        if (orient == 0 && (state == SIT || state == WALK || state == SLEEP)) Hop(0, -600 * S);
+        if (screenDay != DateTime.Today) { screenDay = DateTime.Today; screenToday = 0; }
+        if (IdleMs() > 5 * 60 * 1000) { useSec = waterSec = stretchSec = lastTold = 0; return; }
+        useSec++; waterSec++; stretchSec++; sinceNudge++; screenToday++;
+        if (screenToday % 300 == 0) SaveProgress();
+        if (focusPhase == 1 || MovieOn || alert != null || sign != null || bubbleT > 0 || state == HELD || state == AIR || state == SWING || Busy()) return;
+        bool water = cfg.Water > 0 && waterSec >= cfg.Water * 60, stretch = cfg.Stretch > 0 && stretchSec >= cfg.Stretch * 60;
+        int every = cfg.ScreenTime * 60;
+        if (stretch || water)
+        {
+            string line = TextTools.Span(useSec) + (stretch ? " without a break. Stand up and stretch" + (water ? ", and have some water!" : "!") : " on screen. Time for a sip of water!");
+            if (stretch) stretchSec = 0;
+            if (water) waterSec = 0;
+            sinceNudge = 0; MessageBeep(0x40);
+            if (hidden) { Tray(1, stretch ? "Stretch break" : "Water break", line); return; }
+            Say(line, 7); pushTarget = IntPtr.Zero;
+            if (orient != 0) LetGo(null); else SetState(SIT, 6);
+            if (stretch) stretchT = 5; else drinkT = 4.5;
+        }
+        else if (every > 0 && useSec / every > lastTold && sinceNudge > 600 && !cfg.Quiet && !hidden)
+        {
+            lastTold = useSec / every; sinceNudge = 0; clockT = 4;
+            Say(TextTools.Span(useSec) + " on screen without a break" + (screenToday > useSec + 300 ? " (" + TextTools.Span(screenToday) + " today)." : "."), 5);
+            if (orient == 0) SetState(SIT, 4);
+        }
+    }
+
+    static bool Busy() { int q; return (SHQueryUserNotificationState(out q) == 0 && q >= 2 && q <= 4) || TextTools.Activity(fgProc, fgTitle, fgUrl) == "meeting"; }
+
+    // Now and then it goes web-slinging: two or three quick swings across the screen, then carries on.
+    static bool WebTrip()
+    {
+        if (focusPhase == 1 || doing == "work" || doing == "study" || MovieOn || grooving) return false;
+        webHops = rnd.Next(1, 3);
+        if (WebHop()) { Chirp("Thwip!", 1); return true; }
+        webHops = 0; return false;
+    }
+
+    static bool WebHop()
+    {
+        double tx = x;
+        for (int i = 0; i < 4 && Math.Abs(tx - x) < (wa.R - wa.L) * 0.25; i++) tx = Rand(wa.L + 12 * U, wa.R - 12 * U);   // somewhere a good way off
+        return StartSwing((int)tx, false, true);
     }
 
     // ------------------------------------------------------------------ curious visits
@@ -1726,14 +1793,14 @@ YouTube         | 240 | youtube.com/watch, - youtube
             // a cute, deliberate landing rather than the usual fall: a solid squash, a happy line, a
             // scatter of dust and a couple of hearts, then a short cooldown before another swing.
             sqK = 0.85; sqT = 0.25; vx = 0; vy = 0; webCool = 1.0;
-            if (alert == null) { joyT = 1.2; Chirp(LandingLines[rnd.Next(LandingLines.Length)], 1.8); Hearts(2); }
+            if (alert == null) { joyT = 1.2; if (webHops == 0) { Chirp(LandingLines[rnd.Next(LandingLines.Length)], 1.8); Hearts(2); } }
             for (int i = 0; i < 5; i++)
                 parts.Add(new Part { X = x + Rand(-9, 9) * U, Y = y - Rand(0, 1.5) * U, VY = -Rand(18, 40) * S, Life = Rand(0.5, 0.9), Text = "\u00B7" });
             if (alert != null)
             {
                 if (alert.CenterX == int.MinValue || Math.Abs(alert.CenterX - x) < 60 * S) StartGlare(); else SetState(RUN, 0);
             }
-            else SetState(SIT, Rand(1.5, 3));
+            else SetState(SIT, webHops > 0 ? 0.2 : Rand(1.5, 3));               // mid-trip: straight on to the next swing
             return;
         }
         sqK = Math.Min(1, vy / (1400 * S)); sqT = 0.25; vx = 0; vy = 0;
@@ -1790,7 +1857,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     {
         held = true; perch = IntPtr.Zero; ignorePerch = IntPtr.Zero; vx = vy = 0;
         orient = 0; climbNext = 0; hangSleep = false; climbAfterWalk = false;   // picked off the wall: upright again
-        pushTarget = IntPtr.Zero;
+        pushTarget = IntPtr.Zero; webHops = 0;
         curiousLine = null;
         if (alert != null) { alert = null; bubbleT = 0; }
         SetState(HELD, 0);
@@ -1929,6 +1996,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
             AppendMenu(m, SEP, UIntPtr.Zero, null);
         }
         AppendMenu(m, GRAY, UIntPtr.Zero, "Level " + level + " " + Rank(level) + "   " + xp + " / " + Cost(level) + " XP");
+        AppendMenu(m, GRAY, UIntPtr.Zero, "Screen time: " + TextTools.Span(useSec) + " without a break, " + TextTools.Span(screenToday) + " today");
         IntPtr stats = CreatePopupMenu();
         AddStatsItems(stats);
         AppendMenu(m, POPUP, Sub(stats), "Stats && achievements");
@@ -2386,7 +2454,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
     static void BeginAlert(Bust b)
     {
         b.Scold = b.Label.Contains("Short") ? Scolds[0] : Scolds[1 + rnd.Next(Scolds.Length - 1)];
-        alert = b; bubbleT = 0; curiousLine = null; askT = 0;
+        alert = b; bubbleT = 0; curiousLine = null; askT = 0; webHops = 0;
         if (state == SWING) return;                                             // Land() sees the alert and carries on from there
         if (cfg.Wander && b.CenterX != int.MinValue && Math.Abs(Clamp((double)b.CenterX, wa.L + 8 * U, wa.R - 8 * U) - x) > 150 * S && StartSwing(b.CenterX, true)) return;
         if (orient != 0) LetGo(null);                                           // drops, then Land() sends it running
@@ -2433,9 +2501,11 @@ YouTube         | 240 | youtube.com/watch, - youtube
         DateTime stamp = File.GetLastWriteTimeUtc(RulesPath);
         while (true)
         {
-            Thread.Sleep(1000);
+            askFocus.WaitOne(1000);
             try
             {
+                bool ask; lock (Sync) { ask = focusAsk; focusAsk = false; }
+                if (ask) { int fx, fy; bool found = reader.FocusPoint(out fx, out fy); lock (Sync) { focusGot = true; focusX = found ? fx : int.MinValue; focusY = fy; } }
                 DateTime st = File.GetLastWriteTimeUtc(RulesPath);
                 if (st != stamp) { cfg = Parse(File.ReadAllLines(RulesPath)); stamp = st; }
 
@@ -2683,8 +2753,12 @@ YouTube         | 240 | youtube.com/watch, - youtube
         double k = sqT > 0 ? sqK * sqT / 0.25 : 0;
         sx = 1 + 0.16 * k; sy = 1 - 0.22 * k;
         if (state == HELD) { sx = 0.94; sy = 1.06; }
-        bool vibing = lastKind == 1 && (state == SIT || state == TYPE) && danceLevel > 0.04;
+        bool vibing = lastKind == 1 && grooving && (state == SIT || state == TYPE) && danceLevel > 0.04;
         if (vibing) { double d = Math.Min(1, danceLevel * 1.6); sx *= 1 + 0.07 * d; sy *= 1 - 0.11 * d; }
+        double reach = stretchT > 0 && orient == 0 && state == SIT ? Math.Min(1, Math.Min((5 - stretchT) / 0.6, stretchT / 0.6)) : 0;   // stretch: eases up, holds, eases down
+        if (reach > 0) { sx *= 1 - 0.06 * reach; sy *= 1 + 0.16 * reach; }
+        bool drinking = drinkT > 0 && state == SIT && orient == 0 && alert == null, clock = clockT > 0 && state == SIT && orient == 0 && alert == null;
+        bool phonesOn = wasPhones || (cfg.Audio && lastKind == 1);                // its own headset while the music plays
 
         bool sleeping = state == SLEEP || hangSleep;
         bool angry = angryT > 0 || state == RUN || state == GLARE || state == SWIPE || (state == SWING && alert != null);
@@ -2722,6 +2796,25 @@ YouTube         | 240 | youtube.com/watch, - youtube
         if (vibing && joyT <= 0 && state == SIT) { leftUp = (int)(animT * 2.5) % 2 == 0; rightUp = !leftUp; }   // arms sway to the music
         bool notes = lastKind == 2 && state == SIT && alert == null;
         if (notes) leftBusy = true;                                             // left paw holds the notepad
+        if (reach > 0)                                                          // both paws reaching for the ceiling, one then the other
+        {
+            leftBusy = rightBusy = true; bool alt = (int)(animT * 1.5) % 2 == 0;
+            Px(0.6, alt ? -2.6 : -2, 1.6, 3.4, body); Px(11.8, alt ? -2 : -2.6, 1.6, 3.4, body);
+        }
+        if (drinking || clock) { if (facing > 0) rightBusy = true; else leftBusy = true; }
+        if (drinking)                                                           // a glass of water: raised, sipped, lowered
+        {
+            double lift = Clamp(Math.Min((4.5 - drinkT) / 0.5, drinkT / 0.5), 0, 1), level = Clamp(drinkT / 4, 0.2, 1);
+            double gx = facing > 0 ? 10.2 : 1.4, gy = 4.6 - 1.8 * lift;
+            Px(facing > 0 ? 11.8 : 0.2, gy + 1.2, 2, 1.4, body);
+            Px(gx, gy, 2.4, 3, WHITE); Px(gx + 0.3, gy + 0.3 + 2.4 * (1 - level), 1.8, 2.4 * level, CUP);
+        }
+        if (clock)                                                              // holds up a little clock: screen time
+        {
+            double kx = facing > 0 ? 11.4 : 0.2;
+            Px(facing > 0 ? 12 : 0, 4.2 + dy, 2, 1.6, body);
+            Px(kx, 2.2 + dy, 2.4, 2.4, WHITE); Px(kx + 1.05, 2.6 + dy, 0.3, 1.1, DARK); Px(kx + 1.05, 3.4 + dy, 0.9, 0.3, DARK);
+        }
         if (!leftBusy) Px(0, leftUp ? 1 : 4 + dy, 2, 2, body);
         if (!rightBusy) Px(12, rightUp ? 1 : 4 + dy, 2, 2, body);
         if (notes)
@@ -2759,16 +2852,16 @@ YouTube         | 240 | youtube.com/watch, - youtube
             if (munching && paw > 0.75) Px(4.6, 3.2, 0.6, 0.6, STAR);            // a kernel on the way to its mouth
         }
 
-        if (sleeping || (blinkOn > 0 && !angry && !joy)) { Px(3.8, 3 + dy, 1.4, 0.5, EYE); Px(8.8, 3 + dy, 1.4, 0.5, EYE); }
+        if (sleeping || reach > 0.5 || drinking || (blinkOn > 0 && !angry && !joy)) { Px(3.8, 3 + dy, 1.4, 0.5, EYE); Px(8.8, 3 + dy, 1.4, 0.5, EYE); }
         else if (joy) { Px(3, 3 + dy, 1, 1, EYE); Px(4, 2 + dy, 1, 1, EYE); Px(5, 3 + dy, 1, 1, EYE); Px(8, 3 + dy, 1, 1, EYE); Px(9, 2 + dy, 1, 1, EYE); Px(10, 3 + dy, 1, 1, EYE); }
         else if (angry) { Px(3.5 + lookX, 2 + dy, 1, 1, EYE); Px(4.5 + lookX, 3 + dy, 1, 1, EYE); Px(9.5 + lookX, 2 + dy, 1, 1, EYE); Px(8.5 + lookX, 3 + dy, 1, 1, EYE); }
         else { Px(4 + lookX, 2 + lookY + dy, 1, 2, EYE); Px(9 + lookX, 2 + lookY + dy, 1, 2, EYE); }
 
         int costume = Costume();
-        DrawRank(dy, wasPhones || costume != 0);
+        DrawRank(dy, phonesOn || costume != 0);
         DrawCostume(dy, body, costume);
         DrawTraits(dy);
-        if (wasPhones)
+        if (phonesOn)
         {
             Px(2.4, dy - 1.2, 9.2, 0.7, DARK);                                      // band over the head
             Px(1.7, dy - 0.8, 0.8, 1.8, DARK); Px(11.5, dy - 0.8, 0.8, 1.8, DARK);
@@ -2927,6 +3020,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
         ok(TextTools.ParseHotkey("win+space", out mk, out kk) && mk == 8 && kk == 0x20);
         ok(!TextTools.ParseHotkey("r", out mk, out kk) && !TextTools.ParseHotkey("ctrl+f25", out mk, out kk));
         ok(!TextTools.ParseHotkey("ctrl+a+b", out mk, out kk) && !TextTools.ParseHotkey("off", out mk, out kk) && !TextTools.ParseHotkey(null, out mk, out kk));
+        ok(TextTools.Span(45 * 60) == "45 min" && TextTools.Span(90 * 60) == "1h 30m" && TextTools.Span(7200) == "2h" && c.Water == 45 && c.ScreenTime == 60 && c.Stretch == 90);
         ok(AgentDefs.All.Length == 6 && AgentDefs.Find("antigravity")[3] == "antigravity" && AgentDefs.Find("nope") == null);
         foreach (var sp in AgentDefs.All)
         {
@@ -3466,6 +3560,13 @@ static class TextTools
         return sb.ToString();
     }
 
+    // "45 min", "1h 30m", "2h": how long, for the break buddy.
+    public static string Span(int seconds)
+    {
+        int m = seconds / 60;
+        return m < 60 ? m + " min" : m / 60 + "h" + (m % 60 > 0 ? " " + m % 60 + "m" : "");
+    }
+
     public static string ProjectName(string cwd)
     {
         string t = (cwd ?? "").TrimEnd('\\', '/');
@@ -3711,6 +3812,24 @@ class UrlReader
         return null;
     }
 
+    // The focused field, for the Enter rope: its middle, or 200 px in from the left of a long one, where typing sits.
+    public bool FocusPoint(out int x, out int y)
+    {
+        x = y = 0;
+        if (auto == null) return false;
+        IUIAutomationElement e = null;
+        try
+        {
+            e = auto.GetFocusedElement();
+            var r = e == null ? null : e.GetCurrentPropertyValue(30001) as double[];   // BoundingRectangle: left, top, width, height
+            if (r == null || r.Length < 4 || r[2] < 4 || r[3] < 4 || r[3] > 400) return false;   // nothing, or a whole page
+            x = (int)(r[0] + Math.Min(r[2] / 2, 200)); y = (int)(r[1] + r[3] / 2);
+            return true;
+        }
+        catch { return false; }
+        finally { if (e != null) try { Marshal.ReleaseComObject(e); } catch { } }
+    }
+
     void Drop() { if (bar != null) { try { Marshal.ReleaseComObject(bar); } catch { } } bar = null; }
 }
 
@@ -3719,7 +3838,7 @@ interface IUIAutomation
 {
     void _0(); void _1(); void _2();
     IUIAutomationElement ElementFromHandle(IntPtr hwnd);
-    void _4(); void _5(); void _6(); void _7(); void _8(); void _9(); void _10(); void _11(); void _12(); void _13(); void _14(); void _15(); void _16(); void _17(); void _18(); void _19();
+    void _4(); IUIAutomationElement GetFocusedElement(); void _6(); void _7(); void _8(); void _9(); void _10(); void _11(); void _12(); void _13(); void _14(); void _15(); void _16(); void _17(); void _18(); void _19();
     IUIAutomationCondition CreatePropertyCondition(int propertyId, [MarshalAs(UnmanagedType.Struct)] object value);
 }
 

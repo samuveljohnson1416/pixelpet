@@ -38,7 +38,7 @@ func mk(_ y: Int, _ mo: Int, _ d: Int, _ h: Int = 0, _ mi: Int = 0) -> Date {
 struct Rule { var label: String; var grace: Int; var any: [String] }
 
 final class Cfg {
-    var countdown = 3, snooze = 5, focus = 25, brk = 5, stretch = 90
+    var countdown = 3, snooze = 5, focus = 25, brk = 5, stretch = 90, water = 45, screenTime = 60
     var agents = true, push = true, quiet = false, costumes = true
     var clipKey = "ctrl+alt+shift+c", swingKey = "ctrl+alt+shift+w"
     var nag = false, wander = true, sleepy = true, typing = true, enterRope = true, climb = true
@@ -68,7 +68,9 @@ audio = yes        # wears headphones when they're connected; dances to music, t
 size = 1           # pet size multiplier (restart)
 focus = 25         # focus timer minutes
 break = 5          # break minutes
-stretch = 90       # nudge to stretch after this many minutes of non-stop activity (0 = off)
+stretch = 90       # stand up and stretch after this many minutes of non-stop use (0 = off)
+water = 45         # a sip of water after this many minutes of non-stop use (0 = off)
+screentime = 60    # says how long you've been on the screen, every this many minutes of non-stop use (0 = off)
 agents = yes       # reacts when a coding agent (Claude Code, Codex, Gemini, Antigravity...) works, needs you, or finishes
 push = yes         # nudges windows around like furniture now and then; throw it at a window to knock it aside
 costumes = yes     # hats and props for the moment: telescope, detective glass, lab flask, wizard, parachute...
@@ -133,6 +135,8 @@ func parseCfg(_ lines: [String]) -> Cfg {
             case "focus": c.focus = max(1, n)
             case "break": c.brk = max(1, n)
             case "stretch": c.stretch = max(0, n)
+            case "water": c.water = max(0, n)
+            case "screentime": c.screenTime = max(0, n)
             case "claude", "agents": c.agents = yes
             case "push": c.push = yes
             case "quiet": c.quiet = yes
@@ -178,6 +182,8 @@ func stripBadge(_ t0: String) -> String {
 
 // ---------------------------------------------------------------------- progress, ranks, achievements, days
 func cost(_ level: Int) -> Int { max(5, Int((50 * pow(1.28, Double(level - 1)) / 5).rounded(.toNearestOrEven)) * 5) }
+// "45 min", "1h 30m", "2h": how long, for the break buddy.
+func span(_ seconds: Int) -> String { let m = seconds / 60; return m < 60 ? "\(m) min" : "\(m / 60)h" + (m % 60 > 0 ? " \(m % 60)m" : "") }
 func rank(_ lv: Int) -> String { lv >= 35 ? "Legend" : lv >= 20 ? "Hero" : lv >= 10 ? "Scout" : lv >= 5 ? "Companion" : "Hatchling" }
 func nextRank(_ lv: Int) -> Int { lv < 5 ? 5 : lv < 10 ? 10 : lv < 20 ? 20 : lv < 35 ? 35 : 0 }
 
@@ -850,6 +856,7 @@ func runSelfTest() -> Int {
     ok(TextTools.projectName("/Users/me/pixelpet/") == "pixelpet" && TextTools.projectName("C:\\Users\\me\\api") == "api" && TextTools.projectName("") == "")
     ok(rank(1) == "Hatchling" && rank(5) == "Companion" && rank(19) == "Scout" && rank(35) == "Legend" && nextRank(35) == 0)
     ok(achNames.count == achHow.count && achNames.count <= 31)
+    ok(span(45 * 60) == "45 min" && span(90 * 60) == "1h 30m" && span(7200) == "2h" && c.water == 45 && c.screenTime == 60 && c.stretch == 90)
     let dd = decodeDay(encodeDay(mk(2026, 9, 18), [3, 5, 2, 1, 0, 4, 1]))
     ok(dd != nil && dd!.0 == mk(2026, 9, 18) && dd!.1[0] == 3 && dd!.1[5] == 4 && dd!.1[6] == 1)
     ok(decodeDay("junk") == nil)

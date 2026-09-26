@@ -187,7 +187,9 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var detectiveT = 0.0, wizardT = 0.0, paraT = 0.0, eyeingNow = false, agentBusy = false
     var clipKeyText = "", swingKeyText = "", hotRefs: [EventHotKeyRef?] = []
     var snackT = 5.0, snackLeft = 0.0, snackKind = 0
-    var agents: [String: AgentSess] = [:], lastAgentXp = Date.distantPast, activeSec = 0
+    var agents: [String: AgentSess] = [:], lastAgentXp = Date.distantPast
+    var useSec = 0, waterSec = 0, stretchSec = 0, sinceNudge = 9999, lastTold = 0, screenToday = 0, screenDay = Date.distantPast   // break buddy
+    var drinkT = 0.0, stretchT = 0.0, clockT = 0.0, grooveT = 0.0, grooving = false, webHops = 0
     var closes = 0, pats = 0, focusDone = 0, remDone = 0, clipActs = 0, claudeDone = 0, streak = 0, bestStreak = 0, ach = 0
     var lastDay = Date.distantPast, nightOwl = false, askedAX = false
     var memTail: [String] = [], today = [Int](repeating: 0, count: 7), todayDate = Date.distantPast, met = Date.distantPast, hist: [String] = []
@@ -285,6 +287,8 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         winCache = nil
         animT += dt; stateT += dt
         chargeT = max(0, chargeT - dt)
+        if drinkT > 0 { drinkT -= dt; if drinkT <= 0 { hearts(2) } }
+        stretchT = max(0, stretchT - dt); clockT = max(0, clockT - dt)
         detectiveT = max(0, detectiveT - dt); wizardT = max(0, wizardT - dt); paraT = max(0, paraT - dt)
         clipOfferT -= dt; curiousT -= dt; askT -= dt
         joyT = max(0, joyT - dt); angryT = max(0, angryT - dt); sqT = max(0, sqT - dt); bubbleT -= dt
@@ -308,7 +312,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let left = max(0, Int(focusEnd.timeIntervalSinceNow))
                 tagCache = (focusPhase == 1 ? "Focus " : "Break ") + "\(left / 60):" + String(format: "%02d", left % 60)
             }
-            stretchCheck()
+            wellness()
             if gcSec % 60 == 0 { rollDay() }
             if gcSec % 600 == 30 { diskCheck() }
             let agentLine = agentTag()
@@ -348,12 +352,13 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if alert == nil { say(phones ? "Headphones on!" : "Headphones off.", 2.2); if phones { joyT = 1.5; hearts(2) } }
         }
         if kind != lastKind {
-            lastKind = kind
+            lastKind = kind; grooving = kind == 1; grooveT = rand(15, 35)
             if alert == nil && kind == 1 { say("Ooh, music!", 2) }
             else if alert == nil && kind == 2 { say("Class time. Taking notes.", 2.5); if state == WALK || state == SLEEP { setState(SIT, 6) } }
         }
-        danceLevel = danceLevel * 0.55 + (kind == 1 ? audioPeak : 0) * 0.45
-        if kind == 1 && audioPeak > 0.05 && (state == SIT || state == TYPE || state == WALK) {
+        if kind == 1 { grooveT -= dt; if grooveT <= 0 { grooving.toggle(); grooveT = grooving ? rand(15, 35) : rand(30, 70) } }   // dances a while, then a break
+        danceLevel = danceLevel * 0.55 + (kind == 1 && grooving ? audioPeak : 0) * 0.45
+        if kind == 1 && grooving && audioPeak > 0.05 && (state == SIT || state == TYPE || state == WALK) {
             noteT -= dt
             if noteT <= 0 { noteT = rand(0.6, 1.2); part(x + rand(-7, 6) * U, y - 11 * U, -35 * S, 1.5, Bool.random() ? "\u{266A}" : "\u{266B}") }
         }
@@ -454,16 +459,16 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // ------------------------------------------------------------------ web-swing and the Return rope
-    @discardableResult func startSwing(_ cursorX: Double, _ forAlert: Bool = false) -> Bool {
+    @discardableResult func startSwing(_ cursorX: Double, _ forAlert: Bool = false, _ trip: Bool = false) -> Bool {
         if !cfg.webTravel || held || hidden { return false }
         if forAlert { if state == SWING || state == AIR || state == HELD { return false } }
         else {
-            if alert != nil || sign != nil || webCool > 0 { return false }
+            if alert != nil || sign != nil || (webCool > 0 && !trip) { return false }
             if ![SIT, WALK, SLEEP, TYPE, HANG, CLIMB].contains(state) { return false }
         }
         let tx = clamp(cursorX, wa.l + 8 * U, wa.r - 8 * U)
         let dist = abs(tx - x)
-        if dist < 40 * S { if !forAlert { say("Already here!", 1.2) }; return false }
+        if dist < 40 * S { if !forAlert && !trip { say("Already here!", 1.2) }; return false }
         orient = 0; climbNext = 0; hangSleep = false; climbAfterWalk = false; perch = 0; ignorePerch = 0
         curiousLine = nil; askT = 0; bubbleT = 0; pushTarget = 0
         swingSX = x; swingSY = y; swingTX = tx; swingTY = wa.b
@@ -472,7 +477,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         swingAX = swingSX + (swingTX - swingSX) * 0.5
         swingAY = baseline - rise
         facing = swingTX >= swingSX ? 1 : -1
-        setState(SWING, clamp(dist / ((forAlert ? 700 : 520) * S), forAlert ? 0.45 : 0.55, forAlert ? 1.5 : 1.7))   // an alert is in a hurry
+        setState(SWING, clamp(dist / ((forAlert ? 1200 : 1000) * S), 0.35, 0.9))   // quick, and quicker still for an alert
         return true
     }
 
@@ -569,9 +574,11 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func chooseNext() {
-        let r = Double.random(in: 0..<1)
-        if movieOn { setState(SIT, rand(8, 15)); return }                         // stay put and watch with you
-        if lastKind == 2 || (lastKind == 1 && r < 0.6) { setState(SIT, rand(4, 8)); return }   // class: don't distract
+        var r = Double.random(in: 0..<1)
+        if webHops > 0 { webHops -= 1; if webHop() { return }; webHops = 0 }        // the rest of a web-slinging trip
+        if movieOn && r < 0.8 { setState(SIT, rand(10, 20)); return }            // watch with you, with the odd break
+        if movieOn { chirp(pick(["Be right back!", "Popcorn refill!", "Stretching my legs."]), 2); r = Double.random(in: 0..<0.5) }   // a stroll or a nap
+        if lastKind == 2 || (lastKind == 1 && grooving) { setState(SIT, rand(4, 8)); return }   // class: stay put; music: dance, between breaks
         if curiousVisit() { return }
         if perch != 0 {
             if r < 0.35 && cfg.wander { walk(rand(minX(), maxX())) }
@@ -585,8 +592,9 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         else if r < 0.72 && cfg.wander && jumpOntoWindow() { }
         else if r < 0.82 && cfg.wander && cfg.climb { goClimb() }
         else if r < 0.86 && cfg.wander && planPush() { }
-        else if r < 0.9 && cfg.wander { walk(cursor().x) }                        // come see what you're doing
-        else if r < 0.96 { hop(0, -520 * S) }
+        else if r < 0.9 && cfg.wander && cfg.webTravel && webTrip() { }
+        else if r < 0.93 && cfg.wander { walk(cursor().x) }                       // come see what you're doing
+        else if r < 0.97 { hop(0, -520 * S) }
         else { setState(SIT, rand(2, 5)) }
     }
 
@@ -785,7 +793,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
                      "lastday=" + (lastDay == .distantPast ? "" : fmt(lastDay, "yyyy-MM-dd")), "owl=\(nightOwl ? 1 : 0)", "ach=\(ach)",
                      "met=" + (met == .distantPast ? "" : fmt(met, "yyyy-MM-dd")),
                      "day=" + (todayDate == .distantPast ? "" : encodeDay(todayDate, today)), "hist=" + hist.joined(separator: ";"),
-                     "askedax=\(askedAX ? 1 : 0)"]
+                     "askedax=\(askedAX ? 1 : 0)", "screen=" + fmt(screenDay, "yyyyMMdd") + ":\(screenToday)"]
         try? (lines.joined(separator: "\n") + "\n").write(toFile: progressPath, atomically: true, encoding: .utf8)
     }
 
@@ -807,6 +815,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "owl": nightOwl = n == 1
             case "ach": ach = n
             case "askedax": askedAX = n == 1
+            case "screen": if v.hasPrefix(fmt(Date(), "yyyyMMdd") + ":") { screenToday = Int(v.dropFirst(9)) ?? 0; screenDay = dayStart(Date()) }
             case "lastday": if let d = parseDate(v, "yyyy-MM-dd") { lastDay = d }
             case "met": if let d = parseDate(v, "yyyy-MM-dd") { met = d }
             case "day": if let d = decodeDay(v) { todayDate = d.0; today = d.1 }
@@ -839,7 +848,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // ------------------------------------------------------------------ costumes: a hat and a prop for the moment
     // 1 explorer + telescope, 2 detective, 3 lab flask, 4 wizard, 5 parachute, 6 briefcase, 7 coffee, 8 map, 9 thinking, 10 ideas
     func costume() -> Int {
-        if !cfg.costumes || state == HELD || alert != nil || sign != nil { return 0 }
+        if !cfg.costumes || state == HELD || alert != nil || sign != nil || drinkT > 0 || stretchT > 0 || clockT > 0 { return 0 }
         if paraT > 0 && state == AIR { return 5 }
         if wizardT > 0 { return 4 }
         if askT > 0 { return 9 }
@@ -1170,14 +1179,54 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setState(SIT, rand(2, 4))
     }
 
-    // ------------------------------------------------------------------ stretch nudge
-    func stretchCheck() {
-        if idleSecs() > 300 || focusPhase != 0 { activeSec = 0; return }         // a 5-minute pause counts as a break; focus has its own
-        activeSec += 1
-        if cfg.stretch <= 0 || activeSec < cfg.stretch * 60 || alert != nil || sign != nil { return }
-        activeSec = 0
-        say("You've been at it for \(cfg.stretch) minutes. Stretch those legs?", 6); joyT = 2; beep()
-        if orient == 0 && (state == SIT || state == WALK || state == SLEEP) { hop(0, -600 * S) }
+    // ------------------------------------------------------------------ break buddy: water, stretching and screen time
+    // Counts non-stop use (a 5-minute pause resets it), sends you to drink and to stretch, and now and then says how
+    // long you've been at it. Nudges wait for a free moment: not in a focus session, a movie, a meeting or a
+    // presentation, and never over something it's already saying.
+    func wellness() {
+        if screenDay != dayStart(Date()) { screenDay = dayStart(Date()); screenToday = 0 }
+        if idleSecs() > 300 { useSec = 0; waterSec = 0; stretchSec = 0; lastTold = 0; return }
+        useSec += 1; waterSec += 1; stretchSec += 1; sinceNudge += 1; screenToday += 1
+        if screenToday % 300 == 0 { saveProgress() }
+        if focusPhase == 1 || movieOn || alert != nil || sign != nil || bubbleT > 0 || state == HELD || state == AIR || state == SWING || busy() { return }
+        let water = cfg.water > 0 && waterSec >= cfg.water * 60, stretch = cfg.stretch > 0 && stretchSec >= cfg.stretch * 60
+        let every = cfg.screenTime * 60
+        if stretch || water {
+            let line = span(useSec) + (stretch ? " without a break. Stand up and stretch" + (water ? ", and have some water!" : "!") : " on screen. Time for a sip of water!")
+            if stretch { stretchSec = 0 }
+            if water { waterSec = 0 }
+            sinceNudge = 0; beep()
+            if hidden { notify(stretch ? "Stretch break" : "Water break", line); return }
+            say(line, 7); pushTarget = 0
+            if orient != 0 { letGo(nil) } else { setState(SIT, 6) }
+            if stretch { stretchT = 5 } else { drinkT = 4.5 }
+        } else if every > 0 && useSec / every > lastTold && sinceNudge > 600 && !cfg.quiet && !hidden {
+            lastTold = useSec / every; sinceNudge = 0; clockT = 4
+            say(span(useSec) + " on screen without a break" + (screenToday > useSec + 300 ? " (" + span(screenToday) + " today)." : "."), 5)
+            if orient == 0 { setState(SIT, 4) }
+        }
+    }
+
+    func presenting() -> Bool {
+        guard let f = fgFrame, let s = NSScreen.screens.first else { return false }
+        return f.l <= 0 && f.t <= 0 && f.w >= Double(s.frame.width) && f.h >= primaryH
+    }
+
+    func busy() -> Bool { presenting() || TextTools.activity(fgProc, fgTitle, fgUrl) == "meeting" }
+
+    // Now and then it goes web-slinging: two or three quick swings across the screen, then carries on.
+    func webTrip() -> Bool {
+        if focusPhase == 1 || doing == "work" || doing == "study" || movieOn || grooving { return false }
+        webHops = Int.random(in: 1...2)
+        if webHop() { chirp("Thwip!", 1); return true }
+        webHops = 0
+        return false
+    }
+
+    func webHop() -> Bool {
+        var tx = x
+        for _ in 0..<4 where abs(tx - x) < (wa.r - wa.l) * 0.25 { tx = rand(wa.l + 12 * U, wa.r - 12 * U) }   // somewhere a good way off
+        return startSwing(tx, false, true)
     }
 
     // ------------------------------------------------------------------ curious visits
@@ -1422,11 +1471,11 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if webby {
             // a deliberate landing rather than the usual fall: a squash, a happy line, dust and hearts
             sqK = 0.85; sqT = 0.25; vx = 0; vy = 0; webCool = 1.0
-            if alert == nil { joyT = 1.2; chirp(pick(landingLines), 1.8); hearts(2) }
+            if alert == nil { joyT = 1.2; if webHops == 0 { chirp(pick(landingLines), 1.8); hearts(2) } }
             for _ in 0..<5 { part(x + rand(-9, 9) * U, y - rand(0, 1.5) * U, -rand(18, 40) * S, rand(0.5, 0.9), "\u{00B7}") }
             if let a = alert {
                 if a.centerX == nil || abs(a.centerX! - x) < 60 * S { startGlare() } else { setState(RUN, 0) }
-            } else { setState(SIT, rand(1.5, 3)) }
+            } else { setState(SIT, webHops > 0 ? 0.2 : rand(1.5, 3)) }        // mid-trip: straight on to the next swing
             return
         }
         sqK = min(1, vy / (1400 * S)); sqT = 0.25; vx = 0; vy = 0
@@ -1474,7 +1523,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func startHold() {
         held = true; perch = 0; ignorePerch = 0; vx = 0; vy = 0
         orient = 0; climbNext = 0; hangSleep = false; climbAfterWalk = false   // picked off the wall: upright again
-        pushTarget = 0; curiousLine = nil
+        pushTarget = 0; curiousLine = nil; webHops = 0
         if alert != nil { alert = nil; bubbleT = 0 }
         setState(HELD, 0)
         say("Wheee!", 1)
@@ -1621,6 +1670,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
             m.addItem(.separator())
         }
         add(m, "Level \(level) " + rank(level) + "   \(xp) / \(cost(level)) XP", gray: true)
+        add(m, "Screen time: " + span(useSec) + " without a break, " + span(screenToday) + " today", gray: true)
         let stats = newMenu(); addStatsItems(stats); sub(m, "Stats & achievements", stats)
         if powerKnown && batteryPct >= 0 { add(m, "Battery \(batteryPct)%" + (onAC ? " (charging)" : ""), gray: true) }
         if cfg.audio && (headphones || audioKind != 0) {
@@ -1852,7 +1902,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if alert != nil || state == HELD { return }
         let idle = idleSecs()
-        let fullscreen = fgFrame.map { $0.l <= 0 && $0.t <= 0 && $0.w >= Double(NSScreen.screens.first?.frame.width ?? 0) && $0.h >= primaryH } ?? false
+        let fullscreen = presenting()
         for r in rems {
             if now < r.next { continue }
             if r.kind == "every" {
@@ -1935,7 +1985,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func beginAlert(_ b0: Bust) {
         var b = b0
         b.scold = b.label.contains("Short") ? scolds[0] : scolds[1 + Int.random(in: 0..<(scolds.count - 1))]
-        alert = b; bubbleT = 0; curiousLine = nil; askT = 0
+        alert = b; bubbleT = 0; curiousLine = nil; askT = 0; webHops = 0
         if state == SWING { return }                                             // land() sees the alert and carries on from there
         if cfg.wander, let bx = b.centerX, abs(clamp(bx, wa.l + 8 * U, wa.r - 8 * U) - x) > 150 * S, startSwing(bx, true) { return }
         if orient != 0 { letGo(nil) }                                            // drops, then land() sends it running
@@ -2072,12 +2122,18 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         AXUIElementSetMessagingTimeout(sys, 0.2)
         guard let f = axAttr(sys, kAXFocusedUIElementAttribute) else { return nil }
         let el = f as! AXUIElement
-        guard let range = axAttr(el, kAXSelectedTextRangeAttribute) else { return nil }
+        guard let range = axAttr(el, kAXSelectedTextRangeAttribute) else { return fieldPoint(el) }
         var b: AnyObject?
-        guard AXUIElementCopyParameterizedAttributeValue(el, kAXBoundsForRangeParameterizedAttribute as CFString, range, &b) == .success, let bv = b else { return nil }
+        guard AXUIElementCopyParameterizedAttributeValue(el, kAXBoundsForRangeParameterizedAttribute as CFString, range, &b) == .success, let bv = b else { return fieldPoint(el) }
         var r = CGRect.zero
-        guard AXValueGetValue(bv as! AXValue, .cgRect, &r), r.height > 0 else { return nil }
+        guard AXValueGetValue(bv as! AXValue, .cgRect, &r), r.height > 0 else { return fieldPoint(el) }
         return Pt(x: Double(r.minX), y: Double(r.midY))
+    }
+
+    // No caret to be had (many browsers and web apps): aim at the focused field itself, 200 pt into a long one.
+    func fieldPoint(_ el: AXUIElement) -> Pt? {
+        guard let f = axFrame(el), f.w >= 4, f.h >= 4, f.h <= 400 else { return nil }   // nothing, or a whole page
+        return Pt(x: f.l + min(f.w / 2, 200), y: f.t + f.h / 2)
     }
 
     // ------------------------------------------------------------------ audio: headphones, music vs class
@@ -2196,8 +2252,12 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let k = sqT > 0 ? sqK * sqT / 0.25 : 0
         sx = 1 + 0.16 * k; sy = 1 - 0.22 * k
         if state == HELD { sx = 0.94; sy = 1.06 }
-        let vibing = lastKind == 1 && (state == SIT || state == TYPE) && danceLevel > 0.04
+        let vibing = lastKind == 1 && grooving && (state == SIT || state == TYPE) && danceLevel > 0.04
         if vibing { let d = min(1, danceLevel * 1.6); sx *= 1 + 0.07 * d; sy *= 1 - 0.11 * d }
+        let reach = stretchT > 0 && orient == 0 && state == SIT ? min(1, min((5 - stretchT) / 0.6, stretchT / 0.6)) : 0   // stretch: eases up, holds, eases down
+        if reach > 0 { sx *= 1 - 0.06 * reach; sy *= 1 + 0.16 * reach }
+        let drinking = drinkT > 0 && state == SIT && orient == 0 && alert == nil, clock = clockT > 0 && state == SIT && orient == 0 && alert == nil
+        let phonesOn = wasPhones || (cfg.audio && lastKind == 1)                // its own headset while the music plays
 
         let sleeping = state == SLEEP || hangSleep
         let angry = angryT > 0 || state == RUN || state == GLARE || state == SWIPE || (state == SWING && alert != nil)
@@ -2234,6 +2294,23 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if vibing && joyT <= 0 && state == SIT { leftUp = Int(animT * 2.5) % 2 == 0; rightUp = !leftUp }  // arms sway to the music
         let notes = lastKind == 2 && state == SIT && alert == nil
         if notes { leftBusy = true }                                             // left paw holds the notepad
+        if reach > 0 {                                                          // both paws reaching for the ceiling, one then the other
+            leftBusy = true; rightBusy = true
+            let alt = Int(animT * 1.5) % 2 == 0
+            px(0.6, alt ? -2.6 : -2, 1.6, 3.4, body); px(11.8, alt ? -2 : -2.6, 1.6, 3.4, body)
+        }
+        if drinking || clock { if facing > 0 { rightBusy = true } else { leftBusy = true } }
+        if drinking {                                                           // a glass of water: raised, sipped, lowered
+            let lift = clamp(min((4.5 - drinkT) / 0.5, drinkT / 0.5), 0, 1), level = clamp(drinkT / 4, 0.2, 1)
+            let gx = facing > 0 ? 10.2 : 1.4, gy = 4.6 - 1.8 * lift
+            px(facing > 0 ? 11.8 : 0.2, gy + 1.2, 2, 1.4, body)
+            px(gx, gy, 2.4, 3, WHITE); px(gx + 0.3, gy + 0.3 + 2.4 * (1 - level), 1.8, 2.4 * level, CUP)
+        }
+        if clock {                                                              // holds up a little clock: screen time
+            let kx = facing > 0 ? 11.4 : 0.2
+            px(facing > 0 ? 12 : 0, 4.2 + dy, 2, 1.6, body)
+            px(kx, 2.2 + dy, 2.4, 2.4, WHITE); px(kx + 1.05, 2.6 + dy, 0.3, 1.1, DARK); px(kx + 1.05, 3.4 + dy, 0.9, 0.3, DARK)
+        }
         if !leftBusy { px(0, leftUp ? 1 : 4 + dy, 2, 2, body) }
         if !rightBusy { px(12, rightUp ? 1 : 4 + dy, 2, 2, body) }
         if notes {
@@ -2265,7 +2342,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if munching && paw > 0.75 { px(4.6, 3.2, 0.6, 0.6, STAR) }           // a kernel on the way to its mouth
         }
 
-        if sleeping || (blinkOn > 0 && !angry && !joy) { px(3.8, 3 + dy, 1.4, 0.5, EYE); px(8.8, 3 + dy, 1.4, 0.5, EYE) }
+        if sleeping || reach > 0.5 || drinking || (blinkOn > 0 && !angry && !joy) { px(3.8, 3 + dy, 1.4, 0.5, EYE); px(8.8, 3 + dy, 1.4, 0.5, EYE) }
         else if joy {
             px(3, 3 + dy, 1, 1, EYE); px(4, 2 + dy, 1, 1, EYE); px(5, 3 + dy, 1, 1, EYE)
             px(8, 3 + dy, 1, 1, EYE); px(9, 2 + dy, 1, 1, EYE); px(10, 3 + dy, 1, 1, EYE)
@@ -2274,10 +2351,10 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else { px(4 + lookX, 2 + lookY + dy, 1, 2, EYE); px(9 + lookX, 2 + lookY + dy, 1, 2, EYE) }
 
         let outfit = costume()
-        drawRank(dy, wasPhones || outfit != 0)
+        drawRank(dy, phonesOn || outfit != 0)
         drawCostume(dy, body, outfit)
         drawTraits(dy)
-        if wasPhones {
+        if phonesOn {
             px(2.4, dy - 1.2, 9.2, 0.7, DARK)                                    // band over the head
             px(1.7, dy - 0.8, 0.8, 1.8, DARK); px(11.5, dy - 0.8, 0.8, 1.8, DARK)
             px(1, dy + 0.8, 2, 2.6, CUP); px(11, dy + 0.8, 2, 2.6, CUP)          // ear cups
