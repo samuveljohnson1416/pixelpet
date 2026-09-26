@@ -187,7 +187,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var urlFor = "", urlCache = "", urlReadAt = Date.distantPast, scripts: [String: NSAppleScript] = [:]
     var winCache: [Win]?
     var colors: [Int: NSColor] = [:]
-    var probeSecs = 0.0, probeElapsed = 0, marks: [String] = []
+    var probeSecs = 0.0, probeElapsed = 0, marks: [String] = [], drawnOnce = false
     var cx = 0.0, by = 0.0, sx = 1.0, sy = 1.0
     let bubbleFont = NSFont.boldSystemFont(ofSize: 12), smallFont = NSFont.boldSystemFont(ofSize: 12)
 
@@ -521,7 +521,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let ox = (x0 - 3).rounded(.down), oy = (y0 - 3).rounded(.down), w = (x1 + 3).rounded(.up) - ox, h = (y1 + 3).rounded(.up) - oy
         if ropePanel == nil {                                                    // made the first time a rope or web is thrown
             let rp = makePanel(1, 1), rv = RopeView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
-            rp.ignoresMouseEvents = true
+            rp.ignoresMouseEvents = true; rp.isOneShot = true                    // its drawing buffer is freed whenever it's hidden
             rv.fill = color(ROPE); rv.starFill = color(STAR); rv.ink = color(DARK)
             rp.contentView = rv
             ropePanel = rp; ropeView = rv
@@ -2179,6 +2179,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func render() {
         guard let ctx = NSGraphicsContext.current else { return }
+        if probeSecs > 0 && !drawnOnce { drawnOnce = true; mark("before first frame") }
         NSColor.clear.set(); NSRect(x: 0, y: 0, width: W, height: H).fill(using: .copy)
         if hidden { return }
         ctx.shouldAntialias = false
@@ -2351,8 +2352,9 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         probeElapsed += 1
         if probeElapsed == 2 { mark("first second drawn") }
         if probeElapsed == 12 { startSwing(x < (wa.l + wa.r) / 2 ? wa.r - 100 : wa.l + 100) }
-        if probeElapsed == 14 { mark("after a web-swing (\(state == SWING ? "swinging" : "landed"))") }
-        if probeElapsed == 15 { toggleHidden(); mark("hidden, menu bar icon"); toggleHidden() }
+        if probeElapsed == 15 { mark("after a web-swing (" + (state == SWING ? "swinging" : "landed") + ")") }
+        if probeElapsed == 16 { toggleHidden(); mark("hidden with menu bar icon") }
+        if probeElapsed == 17 { toggleHidden(); mark("shown again") }
         if probeElapsed == 10 {
             let mine = ((CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]) ?? []).filter { ($0[kCGWindowOwnerPID as String] as? Int32) == getpid() }
             print("::notice title=Mac memory::PixelPet Focus uses " + String(format: "%.1f", footprintMB()) + " MB (phys_footprint, the Activity Monitor number)")
@@ -2363,6 +2365,8 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if probeElapsed >= Int(probeSecs) {
             let tag = agentTag() ?? "none"
             print("::notice title=Mac hook and clipboard::agent tag: \(tag), sessions: \(agents.count). Clipboard offer: " + (clipNoticed ? "yes" : "no") + ", clipText: " + (clipText ?? "nil"))
+            mark("at exit")
+            print("::notice title=Mac memory, full run (MB)::" + marks.joined(separator: ", "))
             print("::notice title=Mac memory at exit::" + String(format: "%.1f", footprintMB()) + " MB after \(probeElapsed) s")
             exit(0)
         }
