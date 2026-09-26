@@ -1,10 +1,11 @@
-# Builds PixelPetFocus.exe with the C# compiler that ships with Windows, runs the self-test,
-# and attaches the exe to a GitHub Release whenever a tag like v1.0.0 is pushed.
+# Builds PixelPetFocus.exe with the C# compiler that ships with Windows and "PixelPet Focus.app" with Swift on a
+# Mac runner, runs both self-tests plus a 20-second live run of the Mac app, and attaches both downloads to a
+# GitHub Release whenever a tag like v1.0.0 is pushed.
 name: Build and release
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -33,9 +34,66 @@ jobs:
           name: PixelPetFocus
           path: PixelPetFocus.exe
 
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Compiler errors become annotations, so they show on the run page without opening the log.
+      - name: Build
+        run: |
+          set -o pipefail
+          if ! bash mac/build.sh 2>&1 | tee build.log; then
+            grep -E ': error: |^error: |^ld: |Undefined symbols' build.log | sort -u | head -10 | while IFS= read -r l; do
+              if [[ "$l" =~ ^([^\ :]+\.swift):([0-9]+):([0-9]+):\ error:\ (.*)$ ]]; then
+                echo "::error file=mac/${BASH_REMATCH[1]},line=${BASH_REMATCH[2]},col=${BASH_REMATCH[3]}::${BASH_REMATCH[4]}"
+              else
+                echo "::error::$l"
+              fi
+            done
+            exit 1
+          fi
+
+      - name: Self-test
+        run: '"mac/build/PixelPet Focus.app/Contents/MacOS/PixelPetFocus" --selftest'
+
+      # The real app on this runner's screen: it reports memory, its window, an ASCII picture of what it drew,
+      # and whether a Claude Code hook and a copied reminder reached it.
+      - name: Run it for 20 seconds
+        env:
+          PIXELPET_DIR: ${{ runner.temp }}/petdata
+        run: |
+          APP="mac/build/PixelPet Focus.app/Contents/MacOS/PixelPetFocus"
+          "$APP" --probe 20 2> pet.err &
+          PET=$!
+          sleep 6
+          printf 'call mom in 20 min' | pbcopy
+          echo '{"session_id":"ci","cwd":"/tmp/pixelpet","hook_event_name":"UserPromptSubmit"}' | "$APP" --agent-hook claude working
+          if ! wait $PET; then
+            echo "::error title=Mac run::the app stopped early: $(tail -5 pet.err | tr '\n' ' ')"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PixelPetFocus-mac
+          path: mac/build/PixelPetFocus-mac.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: PixelPetFocus.exe
+          files: |
+            dist/PixelPetFocus.exe
+            dist/PixelPetFocus-mac.zip
           generate_release_notes: true

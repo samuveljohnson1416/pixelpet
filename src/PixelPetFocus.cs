@@ -2021,7 +2021,7 @@ YouTube         | 240 | youtube.com/watch, - youtube
                 ShellExecute(IntPtr.Zero, "open", System.Reflection.Assembly.GetEntryAssembly().Location,
                     (AgentDefs.Connected(sp) ? "--disconnect " : "--connect ") + sp[0], null, 1);
                 break;
-            case 40: case 41: case 42: case 43: case 44: case 45: Answer(cmd); break;
+            case 40: case 41: case 42: case 43: case 44: case 45: case 46: Answer(cmd); break;
             case 30: if (sign != null) ReminderDone(); break;
             case 31: if (sign != null) ReminderSnooze(now.AddMinutes(5)); break;
             case 32: if (sign != null) ReminderSnooze(now.AddMinutes(15)); break;
