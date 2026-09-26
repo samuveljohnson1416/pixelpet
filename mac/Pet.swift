@@ -5,6 +5,7 @@
 // skips that reaction until it's allowed.
 import AppKit
 import Carbon.HIToolbox
+import QuartzCore
 import CoreAudio
 import IOKit.ps
 import UserNotifications
@@ -92,19 +93,30 @@ final class PetView: NSView {
     override func rightMouseDown(with event: NSEvent) { pet?.rightClick(event) }
 }
 
+// The rope and the web: one click-through panel over the main screen that never resizes and holds no bitmap.
+// Each frame only swaps the path of two shape layers (resizing a drawn window every frame made macOS keep
+// megabytes of old buffers).
 final class RopeView: NSView {
-    var poly: [NSPoint] = [], star: [NSPoint]? = nil
-    var fill = NSColor.brown, starFill = NSColor.yellow, ink = NSColor.black
-    override var isFlipped: Bool { true }
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.clear.set(); bounds.fill(using: .copy)
-        if poly.count > 2 { fill.setFill(); path(poly).fill() }
-        if let s = star, s.count > 2 { let p = path(s); starFill.setFill(); p.fill(); ink.setStroke(); p.lineWidth = 2; p.stroke() }
+    let rope = CAShapeLayer(), star = CAShapeLayer()
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        let root = CALayer()
+        root.isGeometryFlipped = true                                            // y down, like the pet's coordinates
+        layer = root; wantsLayer = true                                          // layer-hosting: AppKit draws nothing here
+        star.lineWidth = 2
+        root.addSublayer(rope); root.addSublayer(star)
     }
-    func path(_ pts: [NSPoint]) -> NSBezierPath {
-        let p = NSBezierPath(); p.move(to: pts[0])
-        for q in pts.dropFirst() { p.line(to: q) }
-        p.close()
+    required init?(coder: NSCoder) { nil }
+    func show(_ pts: [CGPoint], _ starPts: [CGPoint]?, _ scale: CGFloat) {
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        for l in [rope, star] { l.frame = bounds; l.contentsScale = scale }
+        rope.path = shape(pts)
+        star.path = starPts.map { shape($0) }
+        CATransaction.commit()
+    }
+    func shape(_ pts: [CGPoint]) -> CGPath {
+        let p = CGMutablePath()
+        if pts.count > 2 { p.addLines(between: pts); p.closeSubpath() }
         return p
     }
 }
@@ -187,7 +199,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var urlFor = "", urlCache = "", urlReadAt = Date.distantPast, scripts: [String: NSAppleScript] = [:]
     var winCache: [Win]?
     var colors: [Int: NSColor] = [:]
-    var probeSecs = 0.0, probeElapsed = 0, marks: [String] = [], drawnOnce = false
+    var probeSecs = 0.0, probeElapsed = 0, marks: [String] = [], drawnOnce = false, frameMarked = false
     var cx = 0.0, by = 0.0, sx = 1.0, sy = 1.0
     let bubbleFont = NSFont.boldSystemFont(ofSize: 12), smallFont = NSFont.boldSystemFont(ofSize: 12)
 
@@ -283,6 +295,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if secAcc >= 1 {
             secAcc = 0
             wa = workArea()
+            if gcSec == 0 { mark("1 s of frames") }
             watch()
             if gcSec == 0 { mark("patrol check") }
             audioWatch()
@@ -516,22 +529,18 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func showRope(_ pts: [Pt], _ star: [Pt]?) {
-        var x0 = Double.greatestFiniteMagnitude, y0 = Double.greatestFiniteMagnitude, x1 = -Double.greatestFiniteMagnitude, y1 = -Double.greatestFiniteMagnitude
-        for p in pts + (star ?? []) { x0 = min(x0, p.x); x1 = max(x1, p.x); y0 = min(y0, p.y); y1 = max(y1, p.y) }
-        let ox = (x0 - 3).rounded(.down), oy = (y0 - 3).rounded(.down), w = (x1 + 3).rounded(.up) - ox, h = (y1 + 3).rounded(.up) - oy
+        let screen = NSScreen.screens.first?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: primaryH)
         if ropePanel == nil {                                                    // made the first time a rope or web is thrown
-            let rp = makePanel(1, 1), rv = RopeView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
-            rp.ignoresMouseEvents = true; rp.isOneShot = true                    // its drawing buffer is freed whenever it's hidden
-            rv.fill = color(ROPE); rv.starFill = color(STAR); rv.ink = color(DARK)
+            let rp = makePanel(Double(screen.width), Double(screen.height)), rv = RopeView(frame: NSRect(origin: .zero, size: screen.size))
+            rp.ignoresMouseEvents = true
+            rv.rope.fillColor = color(ROPE).cgColor
+            rv.star.fillColor = color(STAR).cgColor; rv.star.strokeColor = color(DARK).cgColor
             rp.contentView = rv
             ropePanel = rp; ropeView = rv
         }
         guard let rp = ropePanel, let rv = ropeView else { return }
-        rv.poly = pts.map { NSPoint(x: $0.x - ox, y: $0.y - oy) }
-        rv.star = star?.map { NSPoint(x: $0.x - ox, y: $0.y - oy) }
-        rp.setFrame(NSRect(x: ox, y: primaryH - oy - h, width: w, height: h), display: false)
-        rv.frame = NSRect(x: 0, y: 0, width: w, height: h)
-        rv.needsDisplay = true
+        if rp.frame != screen { rp.setFrame(screen, display: false); rv.frame = NSRect(origin: .zero, size: screen.size) }   // resolution changed
+        rv.show(pts.map { CGPoint(x: $0.x, y: $0.y) }, star?.map { CGPoint(x: $0.x, y: $0.y) }, NSScreen.screens.first?.backingScaleFactor ?? 2)
         if !rp.isVisible { rp.orderFrontRegardless() }
     }
 
@@ -2292,6 +2301,7 @@ final class Pet: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let top = orient == 3 ? H - 2 : orient != 0 ? by - 8 * U : by - (dy > 0 ? 10 : 12) * U - 6 * S
         if bubbleT > 0, let b = bubble { pill(b, top, bubbleSign ? SIGN : WHITE, DARK) }
         else if let t = tagCache { pill(t, top, DARK, WHITE) }
+        if probeSecs > 0 && !frameMarked { frameMarked = true; mark("after first frame") }
     }
 
     func pill(_ text: String, _ bottom: Double, _ fillC: Int, _ ink: Int) {
