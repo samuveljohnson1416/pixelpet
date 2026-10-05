@@ -3039,6 +3039,81 @@ YouTube         | 240 | youtube.com/watch, - youtube
         ok(px == 200 && py == 100);                                            // u=1: exactly the target
         SwingPos(0, 100, 50, 0, 200, 100, 0.5, out px, out py);
         ok(Math.Abs(px - 75) < 0.001 && py < 100);                             // midpoint: pulled toward the overhead anchor (bezier, not a straight line)
+
+        // Extra Rule / Match edge cases
+        ok(Match(c, "https://sub.instagram.com/reel/123", "Instagram", "chrome") != null && Match(c, "https://sub.instagram.com/reel/123", "Instagram", "chrome").Label == "Instagram Reels");
+        ok(Match(c, "youtube.com/watch?v=123", "zoom meeting in progress", "chrome") == null);
+        ok(Match(c, "", "", "") == null);
+
+        // Extra Secret detection edge cases
+        ok(TextTools.LooksSecret("sk-proj-1234567890abcdef"));
+        ok(TextTools.LooksSecret("github_pat_11AAAAAAA_123456789"));
+        ok(TextTools.LooksSecret("AKIAIOSFODNN7EXAMPLE"));
+        ok(TextTools.LooksSecret("xoxb-1234567890-1234567890"));
+        ok(TextTools.LooksSecret("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.sD5"));
+        ok(TextTools.LooksSecret("-----BEGIN RSA PRIVATE KEY-----"));
+        ok(TextTools.LooksSecret("P@ssw0rd2026!"));
+        ok(!TextTools.LooksSecret("https://example.com/search?q=sk-123"));
+        ok(!TextTools.LooksSecret("10 + 20 * 30"));
+
+        // Extra Math / Calc edge cases
+        ok(TextTools.Calc("2 + 3 * 4", out v) && v == 14);
+        ok(TextTools.Calc("(2 + 3) * 4", out v) && v == 20);
+        ok(TextTools.Calc("10 / 2 - 3", out v) && v == 2);
+        ok(TextTools.Calc("10 % 3", out v) && v == 1);
+        ok(TextTools.Calc("2 ^ 3", out v) && v == 8);
+        ok(TextTools.Calc("+5 * +2", out v) && v == 10);
+        ok(TextTools.Calc("-5 + 3", out v) && v == -2);
+        ok(!TextTools.Calc("2026/09/18", out v));
+        ok(!TextTools.Calc("12/34/56", out v));
+        ok(!TextTools.Calc("12345", out v));
+
+        // Extra CleanLink edge cases
+        ok(TextTools.CleanLink("https://example.com/p?utm_source=a&utm_medium=b&gclid=1&msclkid=2&id=99&si=keep#sec", out rmv) == "https://example.com/p?id=99&si=keep#sec" && rmv == 4);
+        ok(TextTools.CleanLink("https://spotify.com/track/123?si=secret&id=1", out rmv) == "https://spotify.com/track/123?id=1" && rmv == 1);
+        ok(TextTools.CleanLink("https://example.com/path", out rmv) == "https://example.com/path" && rmv == 0);
+
+        // Extra ParseWhen / ParseReminder edge cases
+        ok(!TextTools.ParseWhen("in 0 min", n0, out w, out msg));
+        ok(!TextTools.ParseWhen("in 45 days", n0, out w, out msg));
+        ok(TextTools.ParseWhen("in 2 hours", n0, out w, out msg) && w == n0.AddHours(2));
+        ok(TextTools.ParseWhen("in an hour", n0, out w, out msg) && w == n0.AddHours(1));
+        ok(TextTools.ParseWhen("in a day", n0, out w, out msg) && w == n0.AddDays(1));
+        var rOvernight = ParseReminder("every 15m 22:00-06:00 | overnight check", n0);
+        ok(rOvernight != null && rOvernight.From == 1320 && rOvernight.To == 360);
+        ok(ParseReminder("daily 25:00 | invalid", n0) == null);
+
+        // Extra JsonField edge cases
+        ok(TextTools.JsonField("{\"prompt\":\"say \\\"cwd\\\": \\\"fake\\\"\",\"cwd\":\"/real/dir\"}", "cwd") == "/real/dir");
+        ok(TextTools.JsonField("{\"msg\":\"line1\\nline2\\ttab\\\"quote\\\\slash\\u00e9\"}", "msg") == "line1\nline2\ttab\"quote\\slashé");
+
+        // AgentSetup.Apply test round-trip on throwaway temp folder
+        string tempDir = Path.Combine(Path.GetTempPath(), "pixelpet-selftest-" + System.Diagnostics.Process.GetCurrentProcess().Id);
+        Directory.CreateDirectory(tempDir);
+        foreach (var sp in AgentDefs.All)
+        {
+            string path = Path.Combine(tempDir, sp[0] + ".json");
+            string initJson = sp[3] == "antigravity" ? "{\"theme\":\"dark\"}" : "{\"theme\":\"dark\",\"hooks\":{\"Other\":[{\"command\":\"echo hi\"}]}}";
+            File.WriteAllText(path, initJson);
+            try
+            {
+                AgentSetup.Apply(sp[0], path, sp[3], sp[4], true, "C:/Tools/PixelPetFocus.exe");
+                AgentSetup.Apply(sp[0], path, sp[3], sp[4], true, "C:/Tools/PixelPetFocus.exe");
+                string onText = File.ReadAllText(path);
+                int eventsCount = sp[4].Split(';').Length;
+                int hookMatches = 0, idx = 0;
+                while ((idx = onText.IndexOf("--agent-hook", idx, StringComparison.Ordinal)) >= 0) { hookMatches++; idx += 12; }
+                ok(hookMatches == eventsCount && onText.Contains("\"theme\"") && onText.Contains("PixelPetFocus.exe"));
+
+                AgentSetup.Apply(sp[0], path, sp[3], sp[4], false, "x");
+                string offText = File.ReadAllText(path);
+                ok(!offText.Contains("--agent-hook") && offText.Contains("\"theme\"") && (sp[3] == "antigravity" || offText.Contains("echo hi")));
+                ok(File.Exists(path + ".pixelpet-backup"));
+            }
+            catch { ok(false); }
+        }
+        try { Directory.Delete(tempDir, true); } catch { }
+
         try { File.WriteAllText(Path.Combine(Path.GetTempPath(), "pixelpet-selftest.txt"), fails == 0 ? "all " + checkNo + " checks passed\r\n" : log.ToString()); } catch { }
         return fails;
     }

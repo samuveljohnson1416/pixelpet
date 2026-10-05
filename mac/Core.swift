@@ -883,6 +883,59 @@ func runSelfTest() -> Int {
     p = swingPos(0, 100, 50, 0, 200, 100, 0.5)
     ok(abs(p.0 - 75) < 0.001 && p.1 < 100)
 
+    // Extra Rule / Match edge cases
+    ok(matchRule(c, "https://sub.instagram.com/reel/123", "Instagram", "google chrome")?.label == "Instagram Reels")
+    ok(matchRule(c, "youtube.com/watch?v=123", "zoom meeting in progress", "google chrome") == nil)
+    ok(matchRule(c, "", "", "") == nil)
+
+    // Extra Secret detection edge cases
+    ok(TextTools.looksSecret("sk-proj-1234567890abcdef"))
+    ok(TextTools.looksSecret("github_pat_11AAAAAAA_123456789"))
+    ok(TextTools.looksSecret("AKIAIOSFODNN7EXAMPLE"))
+    ok(TextTools.looksSecret("xoxb-1234567890-1234567890"))
+    ok(TextTools.looksSecret("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.sD5"))
+    ok(TextTools.looksSecret("-----BEGIN RSA PRIVATE KEY-----"))
+    ok(TextTools.looksSecret("P@ssw0rd2026!"))
+    ok(!TextTools.looksSecret("https://example.com/search?q=sk-123"))
+    ok(!TextTools.looksSecret("10 + 20 * 30"))
+
+    // Extra Math / Calc edge cases
+    ok(TextTools.calc("2 + 3 * 4") == 14)
+    ok(TextTools.calc("(2 + 3) * 4") == 20)
+    ok(TextTools.calc("10 / 2 - 3") == 2)
+    ok(TextTools.calc("10 % 3") == 1)
+    ok(TextTools.calc("2 ^ 3") == 8)
+    ok(TextTools.calc("+5 * +2") == 10)
+    ok(TextTools.calc("-5 + 3") == -2)
+    ok(TextTools.calc("2026/09/18") == nil)
+    ok(TextTools.calc("12/34/56") == nil)
+    ok(TextTools.calc("12345") == nil)
+
+    // Extra CleanLink edge cases
+    var cl2 = TextTools.cleanLink("https://example.com/p?utm_source=a&utm_medium=b&gclid=1&msclkid=2&id=99&si=keep#sec")
+    ok(cl2.0 == "https://example.com/p?id=99&si=keep#sec" && cl2.1 == 4)
+    cl2 = TextTools.cleanLink("https://spotify.com/track/123?si=secret&id=1")
+    ok(cl2.0 == "https://spotify.com/track/123?id=1" && cl2.1 == 1)
+    cl2 = TextTools.cleanLink("https://example.com/path")
+    ok(cl2.0 == "https://example.com/path" && cl2.1 == 0)
+
+    // Extra ParseWhen / ParseReminder edge cases
+    ok(TextTools.parseWhen("in 0 min", n0) == nil)
+    ok(TextTools.parseWhen("in 45 days", n0) == nil)
+    let rw1 = TextTools.parseWhen("in 2 hours", n0)
+    ok(rw1 != nil && rw1!.0 == n0.addingTimeInterval(7200))
+    let rw2 = TextTools.parseWhen("in an hour", n0)
+    ok(rw2 != nil && rw2!.0 == n0.addingTimeInterval(3600))
+    let rw3 = TextTools.parseWhen("in a day", n0)
+    ok(rw3 != nil && rw3!.0 == addDays(n0, 1))
+    let rOvernight = parseReminder("every 15m 22:00-06:00 | overnight check", n0)
+    ok(rOvernight != nil && rOvernight!.from == 1320 && rOvernight!.to == 360)
+    ok(parseReminder("daily 25:00 | invalid", n0) == nil)
+
+    // Extra JsonField edge cases
+    ok(TextTools.jsonField("{\"prompt\":\"say \\\"cwd\\\": \\\"fake\\\"\",\"cwd\":\"/real/dir\"}", "cwd") == "/real/dir")
+    ok(TextTools.jsonField("{\"msg\":\"line1\\nline2\\ttab\\\"quote\\\\slash\\u00e9\"}", "msg") == "line1\nline2\ttab\"quote\\slash\u{e9}")
+
     // Hook installer round trip, per file shape, on throwaway copies: connecting twice leaves one entry per event,
     // other keys survive, and disconnecting takes ours back out.
     let tmp = NSTemporaryDirectory() + "pixelpet-selftest-\(getpid())"
